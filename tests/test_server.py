@@ -7,8 +7,13 @@ from unittest.mock import MagicMock, patch
 import pytest
 import pytest_asyncio
 
+from mcp.types import CallToolResult, TextContent
+
 from linkedin_mcp.models import PostResult, Profile, TokenData
 from linkedin_mcp.server import (
+    LINKEDIN_POST_CHAR_LIMIT,
+    _char_count_line,
+    _find_last_published_urn,
     _handle_article_post,
     _handle_delete_post,
     _handle_health,
@@ -17,6 +22,7 @@ from linkedin_mcp.server import (
     _handle_profile,
     _handle_status,
     _handle_text_post,
+    _handle_undo_last_post,
     _require_token,
     call_tool,
     list_tools,
@@ -53,7 +59,21 @@ class TestListTools:
         assert "linkedin_create_article_post" in names
         assert "linkedin_create_image_post" in names
         assert "linkedin_delete_post" in names
-        assert len(tools) == 10
+        assert "linkedin_undo_last_post" in names
+        assert len(tools) == 11
+
+    @pytest.mark.asyncio
+    async def test_all_schemas_have_additional_properties_false(self):
+        tools = await list_tools()
+        for tool in tools:
+            assert tool.inputSchema.get("additionalProperties") is False, (
+                f"{tool.name} missing additionalProperties: false"
+            )
+
+    @pytest.mark.asyncio
+    async def test_server_has_version(self):
+        from linkedin_mcp.server import server
+        assert server.name == "linkedin-mcp"
 
 
 class TestCallTool:
@@ -338,3 +358,115 @@ class TestHandleHealth:
         assert "[WARN]" in text
         assert "Refresh token available" in text
         assert "[SKIP]" in text
+
+
+class TestCharCount:
+    def test_under_limit(self):
+        result = _char_count_line("Hello")
+        assert "5/3000" in result
+        assert "2995 remaining" in result
+
+    def test_at_limit(self):
+        text = "x" * 3000
+        result = _char_count_line(text)
+        assert "3000/3000" in result
+        assert "0 remaining" in result
+
+    def test_over_limit(self):
+        text = "x" * 3050
+        result = _char_count_line(text)
+        assert "3050/3000" in result
+        assert "OVER LIMIT by 50" in result
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_preview_includes_char_count(self, mock_load):
+        mock_load.return_value = _make_token()
+        result = await _handle_text_post({"text": "Test post"})
+        text = result.content[0].text
+        assert "Characters:" in text
+        assert "/3000" in text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_article_preview_includes_char_count(self, mock_load):
+        mock_load.return_value = _make_token()
+        result = await _handle_article_post({"text": "Check this", "url": "https://example.com"})
+        text = result.content[0].text
+        assert "Characters:" in text
+        assert "/3000" in text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_delete_preview_no_char_count(self, mock_load):
+        mock_load.return_value = _make_token()
+        result = await _handle_delete_post({"post_urn": "urn:li:share:1"})
+        text = result.content[0].text
+        assert "Characters:" not in text
+
+
+class TestFindLastPublishedUrn:
+    def test_no_audit_file(self, tmp_path):
+        with patch("linkedin_mcp.server.audit._get_log_path", return_value=tmp_path / "nope.log"):
+            assert _find_last_published_urn() is None
+
+    def test_no_published_entries(self, tmp_path):
+        log = tmp_path / "audit.log"
+        entry = json.dumps({"action": "preview", "tool": "test", "content_summary": "x"})
+        log.write_text(entry + "\n", encoding="utf-8")
+        with patch("linkedin_mcp.server.audit._get_log_path", return_value=log):
+            assert _find_last_published_urn() is None
+
+    def test_finds_last_published(self, tmp_path):
+        log = tmp_path / "audit.log"
+        e1 = json.dumps({"action": "published", "tool": "test", "result": "urn:li:share:1", "content_summary": "first"})
+        e2 = json.dumps({"action": "published", "tool": "test", "result": "urn:li:share:2", "content_summary": "second"})
+        log.write_text(e1 + "\n" + e2 + "\n", encoding="utf-8")
+        with patch("linkedin_mcp.server.audit._get_log_path", return_value=log):
+            result = _find_last_published_urn()
+            assert result == ("urn:li:share:2", "second")
+
+
+class TestHandleUndoLastPost:
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server._find_last_published_urn", return_value=None)
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_no_posts_returns_error(self, mock_load, mock_find):
+        mock_load.return_value = _make_token()
+        result = await _handle_undo_last_post({})
+        assert result.isError is True
+        assert "No published posts" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server._find_last_published_urn", return_value=("urn:li:share:42", "Hello world"))
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_preview_shows_urn_and_content(self, mock_load, mock_find):
+        mock_load.return_value = _make_token()
+        result = await _handle_undo_last_post({})
+        text = result.content[0].text
+        assert "PREVIEW" in text
+        assert "urn:li:share:42" in text
+        assert "Hello world" in text
+        assert "cannot be undone" in text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.api.delete_post")
+    @patch("linkedin_mcp.server._find_last_published_urn", return_value=("urn:li:share:42", "Hello world"))
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_confirm_deletes(self, mock_load, mock_find, mock_delete):
+        mock_load.return_value = _make_token()
+        mock_delete.return_value = PostResult(
+            urn="urn:li:share:42", status="deleted", message="Post deleted"
+        )
+        result = await _handle_undo_last_post({"confirm": True})
+        text = result.content[0].text
+        assert "Undo complete" in text
+        mock_delete.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_call_tool_routes_undo(self):
+        with patch("linkedin_mcp.server._handle_undo_last_post") as mock:
+            mock.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            result = await call_tool("linkedin_undo_last_post", {})
+            mock.assert_called_once_with({})
+            assert result.content[0].text == "ok"

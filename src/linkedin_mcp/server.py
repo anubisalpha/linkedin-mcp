@@ -13,7 +13,12 @@ from mcp.types import CallToolResult, TextContent, Tool
 from . import api, audit, auth
 from .api import _get_approval_stamp
 
-server = Server("linkedin-mcp")
+LINKEDIN_POST_CHAR_LIMIT = 3000
+
+server = Server(
+    "linkedin-mcp",
+    version="0.2.0",
+)
 
 CONFIRM_DESCRIPTION = (
     "Set to true to publish. When false (default), returns a preview of "
@@ -56,7 +61,16 @@ def _require_token() -> auth.TokenData:
     return token
 
 
-def _preview_result(preview_text: str) -> CallToolResult:
+def _char_count_line(text: str) -> str:
+    length = len(text)
+    remaining = LINKEDIN_POST_CHAR_LIMIT - length
+    if remaining < 0:
+        return f"Characters: {length}/{LINKEDIN_POST_CHAR_LIMIT} (OVER LIMIT by {-remaining})"
+    return f"Characters: {length}/{LINKEDIN_POST_CHAR_LIMIT} ({remaining} remaining)"
+
+
+def _preview_result(preview_text: str, post_text: str = "") -> CallToolResult:
+    char_line = f"\n{_char_count_line(post_text)}" if post_text else ""
     return CallToolResult(
         content=[
             TextContent(
@@ -66,7 +80,7 @@ def _preview_result(preview_text: str) -> CallToolResult:
                     "then call again with confirm=true to publish.\n\n"
                     "---\n"
                     f"{preview_text}\n"
-                    "---"
+                    f"---{char_line}"
                 ),
             )
         ]
@@ -83,22 +97,22 @@ async def list_tools() -> list[Tool]:
                 "You must have a LinkedIn Developer App configured with 'Sign in with LinkedIn' "
                 "and 'Share on LinkedIn' products enabled."
             ),
-            inputSchema={"type": "object", "properties": {}, "required": []},
+            inputSchema={"type": "object", "properties": {}, "required": [], "additionalProperties": False},
         ),
         Tool(
             name="linkedin_logout",
             description="Clear stored LinkedIn authentication tokens.",
-            inputSchema={"type": "object", "properties": {}, "required": []},
+            inputSchema={"type": "object", "properties": {}, "required": [], "additionalProperties": False},
         ),
         Tool(
             name="linkedin_status",
             description="Check current LinkedIn authentication status and token info.",
-            inputSchema={"type": "object", "properties": {}, "required": []},
+            inputSchema={"type": "object", "properties": {}, "required": [], "additionalProperties": False},
         ),
         Tool(
             name="linkedin_profile",
             description="Get the authenticated LinkedIn member's profile (name, email, photo, locale).",
-            inputSchema={"type": "object", "properties": {}, "required": []},
+            inputSchema={"type": "object", "properties": {}, "required": [], "additionalProperties": False},
         ),
         Tool(
             name="linkedin_audit_log",
@@ -113,6 +127,7 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": [],
+                "additionalProperties": False,
             },
         ),
         Tool(
@@ -138,6 +153,7 @@ async def list_tools() -> list[Tool]:
                     "confirm": CONFIRM_SCHEMA,
                 },
                 "required": ["text"],
+                "additionalProperties": False,
             },
         ),
         Tool(
@@ -177,6 +193,7 @@ async def list_tools() -> list[Tool]:
                     "confirm": CONFIRM_SCHEMA,
                 },
                 "required": ["text", "url"],
+                "additionalProperties": False,
             },
         ),
         Tool(
@@ -216,6 +233,7 @@ async def list_tools() -> list[Tool]:
                     "confirm": CONFIRM_SCHEMA,
                 },
                 "required": ["text", "image_path"],
+                "additionalProperties": False,
             },
         ),
         Tool(
@@ -224,7 +242,7 @@ async def list_tools() -> list[Tool]:
                 "Run a health check: verifies token validity, API connectivity, "
                 "and reports token expiry status. Use this to diagnose connection issues."
             ),
-            inputSchema={"type": "object", "properties": {}, "required": []},
+            inputSchema={"type": "object", "properties": {}, "required": [], "additionalProperties": False},
         ),
         Tool(
             name="linkedin_delete_post",
@@ -243,6 +261,24 @@ async def list_tools() -> list[Tool]:
                     "confirm": CONFIRM_SCHEMA,
                 },
                 "required": ["post_urn"],
+                "additionalProperties": False,
+            },
+        ),
+        Tool(
+            name="linkedin_undo_last_post",
+            description=(
+                "Delete the most recently published post. Looks up the last published "
+                "post URN from the audit log and deletes it. Use as a quick undo for "
+                "posts with typos or errors. Must be called twice: first without confirm "
+                "to preview, then with confirm=true after the user confirms deletion."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "confirm": CONFIRM_SCHEMA,
+                },
+                "required": [],
+                "additionalProperties": False,
             },
         ),
     ]
@@ -271,6 +307,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             return await _handle_image_post(arguments)
         elif name == "linkedin_delete_post":
             return await _handle_delete_post(arguments)
+        elif name == "linkedin_undo_last_post":
+            return await _handle_undo_last_post(arguments)
         else:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"Unknown tool: {name}")],
@@ -447,9 +485,10 @@ async def _handle_text_post(args: dict) -> CallToolResult:
 
     if not args.get("confirm", False):
         stamp = _get_approval_stamp()
-        preview = f"Text post ({visibility}):\n\n{text}{stamp}"
+        stamped = text + stamp
+        preview = f"Text post ({visibility}):\n\n{stamped}"
         audit.log("preview", "linkedin_create_text_post", text)
-        return _preview_result(preview)
+        return _preview_result(preview, stamped)
 
     audit.log("publish", "linkedin_create_text_post", text)
     result = api.create_text_post(token.access_token, token.sub, text, visibility)
@@ -467,13 +506,14 @@ async def _handle_article_post(args: dict) -> CallToolResult:
 
     if not args.get("confirm", False):
         stamp = _get_approval_stamp()
-        preview = f"Article post ({visibility}):\n\n{text}{stamp}\n\nURL: {url}"
+        stamped = text + stamp
+        preview = f"Article post ({visibility}):\n\n{stamped}\n\nURL: {url}"
         if title:
             preview += f"\nTitle: {title}"
         if description:
             preview += f"\nDescription: {description}"
         audit.log("preview", "linkedin_create_article_post", f"{text} | {url}")
-        return _preview_result(preview)
+        return _preview_result(preview, stamped)
 
     audit.log("publish", "linkedin_create_article_post", f"{text} | {url}")
     result = api.create_article_post(
@@ -499,13 +539,14 @@ async def _handle_image_post(args: dict) -> CallToolResult:
 
     if not args.get("confirm", False):
         stamp = _get_approval_stamp()
-        preview = f"Image post ({visibility}):\n\n{text}{stamp}\n\nImage: {image_path}"
+        stamped = text + stamp
+        preview = f"Image post ({visibility}):\n\n{stamped}\n\nImage: {image_path}"
         if title:
             preview += f"\nTitle: {title}"
         if description:
             preview += f"\nDescription: {description}"
         audit.log("preview", "linkedin_create_image_post", f"{text} | {image_path}")
-        return _preview_result(preview)
+        return _preview_result(preview, stamped)
 
     audit.log("publish", "linkedin_create_image_post", f"{text} | {image_path}")
     result = api.create_image_post(
@@ -534,6 +575,50 @@ async def _handle_delete_post(args: dict) -> CallToolResult:
     result = api.delete_post(token.access_token, post_urn)
     audit.log("deleted", "linkedin_delete_post", post_urn)
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
+
+
+def _find_last_published_urn() -> tuple[str, str] | None:
+    """Find the URN and content summary of the last published post from the audit log."""
+    path = audit._get_log_path()
+    if not path.exists():
+        return None
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    for line in reversed(lines):
+        if not line.startswith("{"):
+            continue
+        entry = json.loads(line)
+        if entry.get("action") == "published" and entry.get("result"):
+            return entry["result"], entry.get("content_summary", "")
+    return None
+
+
+async def _handle_undo_last_post(args: dict) -> CallToolResult:
+    token = _require_token()
+    last = _find_last_published_urn()
+    if not last:
+        return CallToolResult(
+            content=[TextContent(type="text", text="No published posts found in the audit log.")],
+            isError=True,
+        )
+
+    post_urn, content_summary = last
+
+    if not args.get("confirm", False):
+        preview = (
+            f"UNDO — delete the most recently published post:\n\n"
+            f"URN: {post_urn}\n"
+            f"Content: {content_summary[:200]}\n\n"
+            f"This action cannot be undone."
+        )
+        audit.log("preview", "linkedin_undo_last_post", post_urn)
+        return _preview_result(preview)
+
+    audit.log("undo", "linkedin_undo_last_post", post_urn)
+    result = api.delete_post(token.access_token, post_urn)
+    audit.log("undone", "linkedin_undo_last_post", post_urn)
+    return CallToolResult(
+        content=[TextContent(type="text", text=f"Undo complete — {result.message}")]
+    )
 
 
 async def main() -> None:

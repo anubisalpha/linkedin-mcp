@@ -49,6 +49,7 @@ Restart Claude Code, then ask: *"Log in to my LinkedIn account"*
 | `linkedin_create_article_post` | Share a URL/article with commentary |
 | `linkedin_create_image_post` | Upload an image and publish with text |
 | `linkedin_delete_post` | Delete a post by its URN |
+| `linkedin_undo_last_post` | Quick-delete the most recently published post (undo) |
 
 All write operations require explicit user approval before executing, keeping the integration compliant with LinkedIn's API Terms of Use (no automated posting).
 
@@ -60,11 +61,14 @@ All write operations require explicit user approval before executing, keeping th
 - **Token encryption** — Access tokens are encrypted at rest using Fernet with a machine-derived key
 - **Token refresh** — Silently refreshes expired tokens when a refresh token is available, avoiding unnecessary re-authentication
 - **Health check** — Diagnose issues with a single tool call: checks token validity, API connectivity, credential configuration, and audit log status
+- **Character count** — Post previews show character count against LinkedIn's 3,000-character limit, preventing over-length submissions
+- **Undo/recall** — Quick-delete the most recently published post with a single tool call, without needing to look up the URN
+- **MCP Inspector compatible** — All tool schemas include `additionalProperties: false` and the server declares its version for strict MCP spec compliance
 - **Minimal scope** — Only requests the API scopes needed (`openid`, `profile`, `email`, `w_member_social`)
 
 ### Testing
 
-The project includes a comprehensive test suite with **81 unit tests** covering all modules:
+The project includes a comprehensive test suite with **98 unit tests** covering all modules:
 
 ```bash
 pip install -e ".[dev]"
@@ -77,7 +81,7 @@ pytest tests/ -v
 | `test_auth.py` | 12 | OAuth flow, token refresh, auto-refresh logic |
 | `test_api.py` | 15 | Post building, approval stamp, API calls, URL encoding |
 | `test_audit.py` | 5 | NDJSON logging, truncation, directory creation |
-| `test_server.py` | 30 | All tool handlers, preview enforcement, health check |
+| `test_server.py` | 47 | All tool handlers, preview enforcement, health check, undo, char count, MCP Inspector |
 
 ## Setting up a LinkedIn Developer App
 

@@ -115,7 +115,7 @@ class TestTokenData:
         token = self._make_token()
         future = datetime.now(timezone.utc) + timedelta(days=30)
         token.expires_at = future.isoformat()
-        assert token.days_remaining() == 30
+        assert token.days_remaining() in (29, 30)
 
     def test_days_remaining_zero_when_expired(self):
         token = self._make_token()

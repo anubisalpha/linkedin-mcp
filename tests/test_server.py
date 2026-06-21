@@ -874,3 +874,147 @@ class TestCallToolRoutingNewTools:
             m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
             await call_tool("linkedin_setup", {})
             m.assert_called_once()
+
+
+class TestHealthCheckBranches:
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.audit._get_log_path")
+    @patch("linkedin_mcp.server.httpx.get")
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_expired_no_refresh_token(self, mock_load, mock_get, mock_audit, tmp_path):
+        mock_load.return_value = _make_token(
+            expires_at="2020-01-01T00:00:00+00:00", refresh_token=""
+        )
+        mock_audit.return_value = tmp_path / "nope.log"
+        with patch.dict(os.environ, {"LINKEDIN_CLIENT_ID": "x", "LINKEDIN_CLIENT_SECRET": "y"}):
+            result = await _handle_health()
+        text = result.content[0].text
+        assert "[FAIL] No refresh token" in text
+        assert "[SKIP] API" in text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.audit._get_log_path")
+    @patch("linkedin_mcp.server.httpx.get")
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_no_scope_data(self, mock_load, mock_get, mock_audit, tmp_path):
+        mock_load.return_value = _make_token(scope="")
+        mock_get.return_value = MagicMock(status_code=200)
+        mock_audit.return_value = tmp_path / "nope.log"
+        with patch.dict(os.environ, {"LINKEDIN_CLIENT_ID": "x", "LINKEDIN_CLIENT_SECRET": "y"}):
+            result = await _handle_health()
+        assert "[WARN] Scopes: No scope data" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.audit._get_log_path")
+    @patch("linkedin_mcp.server.httpx.get")
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_missing_credentials(self, mock_load, mock_get, mock_audit, tmp_path):
+        mock_load.return_value = _make_token()
+        mock_get.return_value = MagicMock(status_code=200)
+        mock_audit.return_value = tmp_path / "nope.log"
+        with patch.dict(os.environ, {}, clear=True):
+            result = await _handle_health()
+        assert "[FAIL] Credentials" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.audit._get_log_path")
+    @patch("linkedin_mcp.server.httpx.get")
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_api_401(self, mock_load, mock_get, mock_audit, tmp_path):
+        mock_load.return_value = _make_token()
+        mock_get.return_value = MagicMock(status_code=401)
+        mock_audit.return_value = tmp_path / "nope.log"
+        with patch.dict(os.environ, {"LINKEDIN_CLIENT_ID": "x", "LINKEDIN_CLIENT_SECRET": "y"}):
+            result = await _handle_health()
+        assert "[FAIL] API: Token rejected" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.audit._get_log_path")
+    @patch("linkedin_mcp.server.httpx.get")
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_api_unexpected_status(self, mock_load, mock_get, mock_audit, tmp_path):
+        mock_load.return_value = _make_token()
+        mock_get.return_value = MagicMock(status_code=503)
+        mock_audit.return_value = tmp_path / "nope.log"
+        with patch.dict(os.environ, {"LINKEDIN_CLIENT_ID": "x", "LINKEDIN_CLIENT_SECRET": "y"}):
+            result = await _handle_health()
+        assert "[WARN] API: Unexpected status 503" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.audit._get_log_path")
+    @patch("linkedin_mcp.server.httpx.get")
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_api_connection_error(self, mock_load, mock_get, mock_audit, tmp_path):
+        mock_load.return_value = _make_token()
+        mock_get.side_effect = ConnectionError("refused")
+        mock_audit.return_value = tmp_path / "nope.log"
+        with patch.dict(os.environ, {"LINKEDIN_CLIENT_ID": "x", "LINKEDIN_CLIENT_SECRET": "y"}):
+            result = await _handle_health()
+        assert "[FAIL] API: Cannot reach LinkedIn" in result.content[0].text
+
+
+class TestArticlePostPreviewBranches:
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_preview_with_title_and_description(self, mock_load):
+        mock_load.return_value = _make_token()
+        result = await _handle_article_post({
+            "text": "Check this out",
+            "url": "https://example.com",
+            "title": "Great Article",
+            "description": "A deep dive",
+        })
+        text = result.content[0].text
+        assert "Great Article" in text
+        assert "A deep dive" in text
+
+
+class TestSetupBranches:
+    @pytest.mark.asyncio
+    async def test_custom_port_shown(self):
+        with patch.dict(os.environ, {
+            "LINKEDIN_CLIENT_ID": "cid",
+            "LINKEDIN_CLIENT_SECRET": "csec",
+            "LINKEDIN_MCP_CALLBACK_PORT": "9999",
+        }):
+            with patch("linkedin_mcp.server.auth.load_token", return_value=None):
+                result = await _handle_setup()
+                text = result.content[0].text
+                assert "9999" in text
+                assert "custom port" in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_expired_token_with_refresh(self):
+        with patch.dict(os.environ, {"LINKEDIN_CLIENT_ID": "cid", "LINKEDIN_CLIENT_SECRET": "csec"}):
+            token = _make_token(
+                expires_at="2020-01-01T00:00:00+00:00",
+                refresh_token="rt_abc",
+            )
+            with patch("linkedin_mcp.server.auth.load_token", return_value=token):
+                result = await _handle_setup()
+                text = result.content[0].text
+                assert "Token expired" in text
+                assert "auto-refresh" in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_expired_token_without_refresh(self):
+        with patch.dict(os.environ, {"LINKEDIN_CLIENT_ID": "cid", "LINKEDIN_CLIENT_SECRET": "csec"}):
+            token = _make_token(
+                expires_at="2020-01-01T00:00:00+00:00",
+                refresh_token="",
+            )
+            with patch("linkedin_mcp.server.auth.load_token", return_value=token):
+                result = await _handle_setup()
+                text = result.content[0].text
+                assert "Token expired" in text
+                assert "linkedin_login" in text
+
+    @pytest.mark.asyncio
+    async def test_missing_scopes_on_valid_token(self):
+        with patch.dict(os.environ, {"LINKEDIN_CLIENT_ID": "cid", "LINKEDIN_CLIENT_SECRET": "csec"}):
+            token = _make_token(scope="openid profile")
+            with patch("linkedin_mcp.server.auth.load_token", return_value=token):
+                result = await _handle_setup()
+                text = result.content[0].text
+                assert "Missing scopes" in text
+                assert "ready to use" not in text.lower()

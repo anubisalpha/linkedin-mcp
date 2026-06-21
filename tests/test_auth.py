@@ -355,27 +355,94 @@ class TestOAuthCallbackHandler:
 
 class TestWaitForCallback:
     def test_timeout_raises(self):
-        with pytest.raises(TimeoutError, match="timeout"):
-            auth.wait_for_callback("state123", timeout=0.1)
+        with patch("linkedin_mcp.auth._get_callback_port", return_value=18901):
+            with pytest.raises(TimeoutError, match="timeout"):
+                auth.wait_for_callback("state123", timeout=0.3)
+
+    def test_success_returns_code(self):
+        import threading
+        import urllib.request
+
+        port = 18902
+        with patch("linkedin_mcp.auth._get_callback_port", return_value=port):
+            def send_callback():
+                import time
+                time.sleep(0.2)
+                try:
+                    urllib.request.urlopen(
+                        f"http://localhost:{port}/callback?code=abc123&state=mystate",
+                        timeout=2,
+                    )
+                except Exception:
+                    pass
+
+            t = threading.Thread(target=send_callback, daemon=True)
+            t.start()
+            code = auth.wait_for_callback("mystate", timeout=3)
+            assert code == "abc123"
 
     def test_error_in_callback_raises(self):
         import threading
         import urllib.request
 
-        port = auth._get_callback_port()
-        with patch.object(auth, "_get_callback_port", return_value=0) as mock_port:
-            pass
+        port = 18903
+        with patch("linkedin_mcp.auth._get_callback_port", return_value=port):
+            def send_error():
+                import time
+                time.sleep(0.2)
+                try:
+                    urllib.request.urlopen(
+                        f"http://localhost:{port}/callback?error=access_denied",
+                        timeout=2,
+                    )
+                except Exception:
+                    pass
+
+            t = threading.Thread(target=send_error, daemon=True)
+            t.start()
+            with pytest.raises(RuntimeError, match="access_denied"):
+                auth.wait_for_callback("state", timeout=3)
 
     def test_state_mismatch_raises(self):
         import threading
-        import http.client
+        import urllib.request
 
-        auth._OAuthCallbackHandler.auth_code = "code123"
-        auth._OAuthCallbackHandler.auth_state = "wrong_state"
-        auth._OAuthCallbackHandler.error = None
+        port = 18904
+        with patch("linkedin_mcp.auth._get_callback_port", return_value=port):
+            def send_wrong_state():
+                import time
+                time.sleep(0.2)
+                try:
+                    urllib.request.urlopen(
+                        f"http://localhost:{port}/callback?code=abc&state=wrong",
+                        timeout=2,
+                    )
+                except Exception:
+                    pass
 
-        def fake_serve(expected_state, timeout):
-            raise RuntimeError("OAuth state mismatch")
+            t = threading.Thread(target=send_wrong_state, daemon=True)
+            t.start()
+            with pytest.raises(RuntimeError, match="state mismatch"):
+                auth.wait_for_callback("correct_state", timeout=3)
 
-        with pytest.raises(RuntimeError, match="state mismatch"):
-            fake_serve("correct_state", 1)
+    def test_no_code_raises(self):
+        import threading
+        import urllib.request
+
+        port = 18905
+        with patch("linkedin_mcp.auth._get_callback_port", return_value=port):
+            def send_no_code():
+                import time
+                time.sleep(0.2)
+                try:
+                    urllib.request.urlopen(
+                        f"http://localhost:{port}/callback?state=mystate",
+                        timeout=2,
+                    )
+                except Exception:
+                    pass
+
+            t = threading.Thread(target=send_no_code, daemon=True)
+            t.start()
+            with pytest.raises(RuntimeError, match="No authorization code"):
+                auth.wait_for_callback("mystate", timeout=3)

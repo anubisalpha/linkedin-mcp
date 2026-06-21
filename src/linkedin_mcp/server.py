@@ -12,6 +12,18 @@ from . import api, auth
 
 server = Server("linkedin-mcp")
 
+CONFIRM_DESCRIPTION = (
+    "Set to true to publish. When false (default), returns a preview of "
+    "the post for your review without publishing. Always preview first, "
+    "then call again with confirm=true after the user has approved the content."
+)
+
+CONFIRM_SCHEMA = {
+    "type": "boolean",
+    "description": CONFIRM_DESCRIPTION,
+    "default": False,
+}
+
 
 def _get_credentials() -> tuple[str, str]:
     client_id = os.environ.get("LINKEDIN_CLIENT_ID", "")
@@ -29,6 +41,23 @@ def _require_token() -> auth.TokenData:
     if not token:
         raise RuntimeError("Not logged in. Use the linkedin_login tool first.")
     return token
+
+
+def _preview_result(preview_text: str) -> CallToolResult:
+    return CallToolResult(
+        content=[
+            TextContent(
+                type="text",
+                text=(
+                    "PREVIEW — not yet published. Show this to the user for approval, "
+                    "then call again with confirm=true to publish.\n\n"
+                    "---\n"
+                    f"{preview_text}\n"
+                    "---"
+                ),
+            )
+        ]
+    )
 
 
 @server.list_tools()
@@ -62,7 +91,8 @@ async def list_tools() -> list[Tool]:
             name="linkedin_create_text_post",
             description=(
                 "Publish a text-only post to LinkedIn. "
-                "The post content is sent exactly as provided — review before approving."
+                "Must be called twice: first without confirm to preview, "
+                "then with confirm=true after the user approves the content."
             ),
             inputSchema={
                 "type": "object",
@@ -77,6 +107,7 @@ async def list_tools() -> list[Tool]:
                         "description": "Who can see the post. Defaults to PUBLIC.",
                         "default": "PUBLIC",
                     },
+                    "confirm": CONFIRM_SCHEMA,
                 },
                 "required": ["text"],
             },
@@ -85,7 +116,8 @@ async def list_tools() -> list[Tool]:
             name="linkedin_create_article_post",
             description=(
                 "Share a URL/article on LinkedIn with commentary. "
-                "The post is published exactly as provided — review before approving."
+                "Must be called twice: first without confirm to preview, "
+                "then with confirm=true after the user approves the content."
             ),
             inputSchema={
                 "type": "object",
@@ -114,6 +146,7 @@ async def list_tools() -> list[Tool]:
                         "description": "Who can see the post. Defaults to PUBLIC.",
                         "default": "PUBLIC",
                     },
+                    "confirm": CONFIRM_SCHEMA,
                 },
                 "required": ["text", "url"],
             },
@@ -122,7 +155,8 @@ async def list_tools() -> list[Tool]:
             name="linkedin_create_image_post",
             description=(
                 "Upload an image and publish a post with it on LinkedIn. "
-                "The post is published exactly as provided — review before approving."
+                "Must be called twice: first without confirm to preview, "
+                "then with confirm=true after the user approves the content."
             ),
             inputSchema={
                 "type": "object",
@@ -151,13 +185,18 @@ async def list_tools() -> list[Tool]:
                         "description": "Who can see the post. Defaults to PUBLIC.",
                         "default": "PUBLIC",
                     },
+                    "confirm": CONFIRM_SCHEMA,
                 },
                 "required": ["text", "image_path"],
             },
         ),
         Tool(
             name="linkedin_delete_post",
-            description="Delete a LinkedIn post by its URN.",
+            description=(
+                "Delete a LinkedIn post by its URN. "
+                "Must be called twice: first without confirm to preview, "
+                "then with confirm=true after the user confirms deletion."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -165,6 +204,7 @@ async def list_tools() -> list[Tool]:
                         "type": "string",
                         "description": "The URN of the post to delete (returned when the post was created).",
                     },
+                    "confirm": CONFIRM_SCHEMA,
                 },
                 "required": ["post_urn"],
             },
@@ -258,41 +298,80 @@ async def _handle_text_post(args: dict) -> CallToolResult:
     token = _require_token()
     text = args["text"]
     visibility = args.get("visibility", "PUBLIC")
+
+    if not args.get("confirm", False):
+        preview = f"Text post ({visibility}):\n\n{text}"
+        return _preview_result(preview)
+
     result = api.create_text_post(token.access_token, token.sub, text, visibility)
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 
 async def _handle_article_post(args: dict) -> CallToolResult:
     token = _require_token()
+    text = args["text"]
+    url = args["url"]
+    title = args.get("title", "")
+    description = args.get("description", "")
+    visibility = args.get("visibility", "PUBLIC")
+
+    if not args.get("confirm", False):
+        preview = f"Article post ({visibility}):\n\n{text}\n\nURL: {url}"
+        if title:
+            preview += f"\nTitle: {title}"
+        if description:
+            preview += f"\nDescription: {description}"
+        return _preview_result(preview)
+
     result = api.create_article_post(
         access_token=token.access_token,
         person_urn=token.sub,
-        text=args["text"],
-        url=args["url"],
-        title=args.get("title", ""),
-        description=args.get("description", ""),
-        visibility=args.get("visibility", "PUBLIC"),
+        text=text,
+        url=url,
+        title=title,
+        description=description,
+        visibility=visibility,
     )
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 
 async def _handle_image_post(args: dict) -> CallToolResult:
     token = _require_token()
+    text = args["text"]
+    image_path = args["image_path"]
+    title = args.get("title", "")
+    description = args.get("description", "")
+    visibility = args.get("visibility", "PUBLIC")
+
+    if not args.get("confirm", False):
+        preview = f"Image post ({visibility}):\n\n{text}\n\nImage: {image_path}"
+        if title:
+            preview += f"\nTitle: {title}"
+        if description:
+            preview += f"\nDescription: {description}"
+        return _preview_result(preview)
+
     result = api.create_image_post(
         access_token=token.access_token,
         person_urn=token.sub,
-        text=args["text"],
-        image_path=args["image_path"],
-        title=args.get("title", ""),
-        description=args.get("description", ""),
-        visibility=args.get("visibility", "PUBLIC"),
+        text=text,
+        image_path=image_path,
+        title=title,
+        description=description,
+        visibility=visibility,
     )
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 
 async def _handle_delete_post(args: dict) -> CallToolResult:
     token = _require_token()
-    result = api.delete_post(token.access_token, args["post_urn"])
+    post_urn = args["post_urn"]
+
+    if not args.get("confirm", False):
+        preview = f"DELETE post: {post_urn}\n\nThis action cannot be undone."
+        return _preview_result(preview)
+
+    result = api.delete_post(token.access_token, post_urn)
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 

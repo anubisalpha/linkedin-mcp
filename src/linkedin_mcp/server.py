@@ -5,6 +5,7 @@ import json
 import os
 from typing import Any
 
+import httpx
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, TextContent, Tool
@@ -392,7 +393,6 @@ async def _handle_health() -> CallToolResult:
 
     # 3. API connectivity check (only if token not expired)
     if not expired:
-        import httpx
         try:
             resp = httpx.get(
                 "https://api.linkedin.com/v2/userinfo",

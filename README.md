@@ -35,6 +35,8 @@ Restart Claude Code, then ask: *"Log in to my LinkedIn account"*
 
 ## Features
 
+### Tools
+
 | Tool | Description |
 |---|---|
 | `linkedin_login` | OAuth 2.0 sign-in — opens your browser for secure authorization |
@@ -42,12 +44,40 @@ Restart Claude Code, then ask: *"Log in to my LinkedIn account"*
 | `linkedin_status` | Check auth status, token expiry, and refresh token availability |
 | `linkedin_health` | Run a health check — token validity, API connectivity, encryption, audit log |
 | `linkedin_profile` | Get your name, email, photo, and locale |
+| `linkedin_audit_log` | View the audit trail of all post previews, publishes, and deletions |
 | `linkedin_create_text_post` | Publish a text post (public or connections-only) |
 | `linkedin_create_article_post` | Share a URL/article with commentary |
 | `linkedin_create_image_post` | Upload an image and publish with text |
 | `linkedin_delete_post` | Delete a post by its URN |
 
 All write operations require explicit user approval before executing, keeping the integration compliant with LinkedIn's API Terms of Use (no automated posting).
+
+### Security and compliance
+
+- **Human-in-the-loop** — Every write tool uses a two-step confirm pattern: preview first (default), then publish only after explicit approval
+- **Approval stamp** — Published posts include a configurable stamp showing the content was human-approved
+- **Audit logging** — Every preview, publish, and delete is recorded in a local NDJSON audit log
+- **Token encryption** — Access tokens are encrypted at rest using Fernet with a machine-derived key
+- **Token refresh** — Silently refreshes expired tokens when a refresh token is available, avoiding unnecessary re-authentication
+- **Health check** — Diagnose issues with a single tool call: checks token validity, API connectivity, credential configuration, and audit log status
+- **Minimal scope** — Only requests the API scopes needed (`openid`, `profile`, `email`, `w_member_social`)
+
+### Testing
+
+The project includes a comprehensive test suite with **81 unit tests** covering all modules:
+
+```bash
+pip install -e ".[dev]"
+pytest tests/ -v
+```
+
+| Test file | Tests | Coverage |
+|---|---|---|
+| `test_models.py` | 19 | Encryption, token save/load, expiry, backward compatibility |
+| `test_auth.py` | 12 | OAuth flow, token refresh, auto-refresh logic |
+| `test_api.py` | 15 | Post building, approval stamp, API calls, URL encoding |
+| `test_audit.py` | 5 | NDJSON logging, truncation, directory creation |
+| `test_server.py` | 30 | All tool handlers, preview enforcement, health check |
 
 ## Setting up a LinkedIn Developer App
 

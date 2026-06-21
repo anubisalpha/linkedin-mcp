@@ -1,0 +1,240 @@
+"""Tests for linkedin_mcp.auth — OAuth flow, token refresh, token persistence."""
+
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import httpx
+import pytest
+
+from linkedin_mcp import auth
+from linkedin_mcp.models import TokenData
+
+
+class TestStartLogin:
+    @patch("webbrowser.open")
+    def test_opens_browser_with_auth_url(self, mock_open):
+        state = auth.start_login("test_client_id")
+        assert len(state) > 0
+        mock_open.assert_called_once()
+        url = mock_open.call_args[0][0]
+        assert "test_client_id" in url
+        assert "localhost" in url and "8585" in url
+        assert "openid" in url
+
+    @patch("linkedin_mcp.auth.webbrowser.open")
+    def test_returns_unique_state_each_call(self, mock_open):
+        s1 = auth.start_login("id")
+        s2 = auth.start_login("id")
+        assert s1 != s2
+
+
+class TestExchangeCode:
+    @patch("linkedin_mcp.auth.httpx.post")
+    def test_exchanges_code_for_token(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "access_token": "new_token",
+                "expires_in": 5184000,
+                "scope": "openid profile",
+                "refresh_token": "refresh_abc",
+                "refresh_token_expires_in": 15552000,
+            },
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        token = auth.exchange_code("auth_code_123", "client_id", "client_secret")
+        assert token.access_token == "new_token"
+        assert token.refresh_token == "refresh_abc"
+        assert token.expires_in == 5184000
+
+        call_data = mock_post.call_args[1]["data"]
+        assert call_data["grant_type"] == "authorization_code"
+        assert call_data["code"] == "auth_code_123"
+
+    @patch("linkedin_mcp.auth.httpx.post")
+    def test_handles_no_refresh_token(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "access_token": "token",
+                "expires_in": 3600,
+            },
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        token = auth.exchange_code("code", "id", "secret")
+        assert token.refresh_token == ""
+        assert token.refresh_token_expires_in == 0
+
+
+class TestFetchSub:
+    @patch("linkedin_mcp.auth.httpx.get")
+    def test_returns_sub_from_userinfo(self, mock_get):
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"sub": "member_xyz"},
+        )
+        mock_get.return_value.raise_for_status = MagicMock()
+
+        sub = auth.fetch_sub("access_token")
+        assert sub == "member_xyz"
+        assert "Bearer access_token" in mock_get.call_args[1]["headers"]["Authorization"]
+
+
+class TestRefreshAccessToken:
+    @patch("linkedin_mcp.auth.httpx.post")
+    def test_successful_refresh(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "access_token": "refreshed_token",
+                "expires_in": 5184000,
+                "scope": "openid",
+                "refresh_token": "new_refresh",
+                "refresh_token_expires_in": 15552000,
+            },
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        token = auth.refresh_access_token("old_refresh", "client_id", "secret")
+        assert token is not None
+        assert token.access_token == "refreshed_token"
+        assert token.refresh_token == "new_refresh"
+
+        call_data = mock_post.call_args[1]["data"]
+        assert call_data["grant_type"] == "refresh_token"
+        assert call_data["refresh_token"] == "old_refresh"
+
+    @patch("linkedin_mcp.auth.httpx.post")
+    def test_failed_refresh_returns_none(self, mock_post):
+        mock_post.return_value = MagicMock(status_code=401)
+        mock_post.return_value.raise_for_status = MagicMock(
+            side_effect=httpx.HTTPStatusError("401", request=MagicMock(), response=MagicMock())
+        )
+
+        token = auth.refresh_access_token("bad_refresh", "id", "secret")
+        assert token is None
+
+    @patch("linkedin_mcp.auth.httpx.post")
+    def test_preserves_old_refresh_token_if_not_returned(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "access_token": "new_access",
+                "expires_in": 3600,
+            },
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        token = auth.refresh_access_token("original_refresh", "id", "secret")
+        assert token.refresh_token == "original_refresh"
+
+
+class TestAutoRefresh:
+    @patch("linkedin_mcp.auth.load_token")
+    def test_returns_token_if_not_expired(self, mock_load):
+        token = TokenData(
+            access_token="valid",
+            expires_in=86400,
+            scope="openid",
+            sub="abc",
+            expires_at="2099-01-01T00:00:00+00:00",
+        )
+        mock_load.return_value = token
+
+        result = auth.auto_refresh("id", "secret")
+        assert result is token
+
+    @patch("linkedin_mcp.auth.load_token")
+    def test_returns_none_if_no_token(self, mock_load):
+        mock_load.return_value = None
+        assert auth.auto_refresh("id", "secret") is None
+
+    @patch("linkedin_mcp.auth.load_token")
+    def test_returns_none_if_expired_no_refresh_token(self, mock_load):
+        token = TokenData(
+            access_token="expired",
+            expires_in=0,
+            scope="openid",
+            sub="abc",
+            refresh_token="",
+            expires_at="2020-01-01T00:00:00+00:00",
+        )
+        mock_load.return_value = token
+        assert auth.auto_refresh("id", "secret") is None
+
+    @patch("linkedin_mcp.auth._get_token_path")
+    @patch("linkedin_mcp.auth.refresh_access_token")
+    @patch("linkedin_mcp.auth.load_token")
+    def test_refreshes_expired_token_with_refresh_token(self, mock_load, mock_refresh, mock_path, tmp_path):
+        mock_path.return_value = tmp_path / "tokens.json"
+        expired_token = TokenData(
+            access_token="old",
+            expires_in=0,
+            scope="openid",
+            sub="member1",
+            refresh_token="my_refresh",
+            expires_at="2020-01-01T00:00:00+00:00",
+        )
+        mock_load.return_value = expired_token
+
+        new_token = TokenData(
+            access_token="fresh",
+            expires_in=5184000,
+            scope="openid",
+        )
+        mock_refresh.return_value = new_token
+
+        result = auth.auto_refresh("id", "secret")
+        assert result is not None
+        assert result.access_token == "fresh"
+        assert result.sub == "member1"
+
+
+class TestLoadAndClearToken:
+    @patch("linkedin_mcp.auth._get_token_path")
+    def test_load_returns_none_when_no_file(self, mock_path, tmp_path):
+        mock_path.return_value = tmp_path / "nope.json"
+        assert auth.load_token() is None
+
+    @patch("linkedin_mcp.auth._get_token_path")
+    def test_clear_returns_false_when_no_file(self, mock_path, tmp_path):
+        mock_path.return_value = tmp_path / "nope.json"
+        assert auth.clear_token() is False
+
+    @patch("linkedin_mcp.auth._get_token_path")
+    def test_clear_deletes_file(self, mock_path, tmp_path):
+        path = tmp_path / "tokens.json"
+        path.write_text("data", encoding="utf-8")
+        mock_path.return_value = path
+
+        assert auth.clear_token() is True
+        assert not path.exists()
+
+
+class TestLogin:
+    @patch("linkedin_mcp.auth._get_token_path")
+    @patch("linkedin_mcp.auth.fetch_sub")
+    @patch("linkedin_mcp.auth.exchange_code")
+    @patch("linkedin_mcp.auth.wait_for_callback")
+    @patch("linkedin_mcp.auth.start_login")
+    def test_full_login_flow(self, mock_start, mock_wait, mock_exchange, mock_sub, mock_path, tmp_path):
+        mock_path.return_value = tmp_path / "tokens.json"
+        mock_start.return_value = "state123"
+        mock_wait.return_value = "auth_code_456"
+        mock_exchange.return_value = TokenData(
+            access_token="at",
+            expires_in=5184000,
+            scope="openid",
+        )
+        mock_sub.return_value = "member_id"
+
+        token = auth.login("client_id", "client_secret")
+        assert token.access_token == "at"
+        assert token.sub == "member_id"
+
+        mock_start.assert_called_once_with("client_id")
+        mock_wait.assert_called_once_with("state123")
+        mock_exchange.assert_called_once_with("auth_code_456", "client_id", "client_secret")

@@ -31,7 +31,9 @@ Add to your Claude Code `.mcp.json`:
 
 > **Important:** Replace `your_client_id` and `your_client_secret` with your actual values. Environment variable references like `${LINKEDIN_CLIENT_ID}` are not supported — use the literal strings.
 
-Restart Claude Code, then ask: *"Log in to my LinkedIn account"*
+Restart Claude Code, then ask: *"Run linkedin_setup to check my configuration"*
+
+The setup assistant will check your credentials, show any missing steps, and guide you through first-time login.
 
 ## Features
 
@@ -50,6 +52,9 @@ Restart Claude Code, then ask: *"Log in to my LinkedIn account"*
 | `linkedin_create_image_post` | Upload an image and publish with text |
 | `linkedin_delete_post` | Delete a post by its URN |
 | `linkedin_undo_last_post` | Quick-delete the most recently published post (undo) |
+| `linkedin_post_history` | View your post history — URNs, timestamps, content, with optional type filter |
+| `linkedin_link_preview` | Fetch Open Graph metadata from a URL to preview how LinkedIn will display it |
+| `linkedin_setup` | First-run setup assistant — checks config and walks through any missing steps |
 
 All write operations require explicit user approval before executing, keeping the integration compliant with LinkedIn's API Terms of Use (no automated posting).
 
@@ -69,11 +74,14 @@ All write operations require explicit user approval before executing, keeping th
 - **Configurable callback port** — Change the OAuth callback port from the default 8585 via environment variable
 - **Type checked** — Full mypy strict mode with no errors across all modules
 - **CI pipeline** — GitHub Actions runs tests and type checking on Python 3.10, 3.11, and 3.12 for every push and PR
+- **Post history** — Local record of all published posts with URNs, timestamps, content, and type filtering
+- **Link preview** — Fetch Open Graph metadata from URLs before sharing to check the link card
+- **First-run setup** — Interactive setup assistant that checks configuration and walks through missing steps
 - **Minimal scope** — Only requests the API scopes needed (`openid`, `profile`, `email`, `w_member_social`)
 
 ### Testing
 
-The project includes a comprehensive test suite with **115 unit tests** (75% coverage) covering all modules:
+The project includes a comprehensive test suite with **184 unit tests** (95% coverage) covering all modules:
 
 ```bash
 pip install -e ".[dev]"
@@ -83,10 +91,11 @@ pytest tests/ -v
 | Test file | Tests | Coverage |
 |---|---|---|
 | `test_models.py` | 24 | Encryption, token save/load, expiry, backward compatibility, configurable key |
-| `test_auth.py` | 16 | OAuth flow, token refresh, auto-refresh logic, configurable port |
-| `test_api.py` | 15 | Post building, approval stamp, API calls, URL encoding |
-| `test_audit.py` | 5 | NDJSON logging, truncation, directory creation |
-| `test_server.py` | 55 | All tool handlers, preview enforcement, health check, undo, char count, scope verification, MCP Inspector |
+| `test_auth.py` | 24 | OAuth flow, token refresh, auto-refresh logic, configurable port, callback handler |
+| `test_api.py` | 26 | Post building, approval stamp, API calls, URL encoding, image upload, link preview |
+| `test_audit.py` | 7 | NDJSON logging, truncation, directory creation, configurable path |
+| `test_history.py` | 14 | Post recording, retrieval, filtering, deletion, corruption handling |
+| `test_server.py` | 89 | All tool handlers, call routing, preview enforcement, health check, undo, char count, scope verification, setup, MCP Inspector |
 
 ## Setting up a LinkedIn Developer App
 
@@ -192,6 +201,7 @@ Add to your `claude_desktop_config.json`:
 | `LINKEDIN_MCP_APPROVAL_STAMP` | No | Text appended to posts showing human approval. Set to empty string to disable. Default: `AI-drafted · Human-approved · Posted via LinkedIn MCP` |
 | `LINKEDIN_MCP_AUDIT_PATH` | No | Custom path for the audit log (default: `~/.linkedin-mcp/audit.log`) |
 | `LINKEDIN_MCP_ENCRYPTION_KEY` | No | Custom encryption key for token storage. Enables token portability between machines. When unset, uses a machine-derived key. |
+| `LINKEDIN_MCP_HISTORY_PATH` | No | Custom path for the post history file (default: `~/.linkedin-mcp/history.json`) |
 | `LINKEDIN_MCP_CALLBACK_PORT` | No | OAuth callback port (default: `8585`). Change if another service is using that port. Remember to update the redirect URL in your LinkedIn Developer App to match. |
 
 ## Usage

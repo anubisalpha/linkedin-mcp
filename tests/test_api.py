@@ -149,6 +149,146 @@ class TestDeletePost:
         assert "%3A" in url
 
 
+class TestRegisterImageUpload:
+    @patch("linkedin_mcp.api.httpx.post")
+    def test_returns_upload_url_and_asset(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "value": {
+                    "uploadMechanism": {
+                        "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest": {
+                            "uploadUrl": "https://upload.example.com/upload"
+                        }
+                    },
+                    "asset": "urn:li:digitalmediaAsset:abc123",
+                }
+            },
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        upload_url, asset_urn = api._register_image_upload("token", "person1")
+        assert upload_url == "https://upload.example.com/upload"
+        assert asset_urn == "urn:li:digitalmediaAsset:abc123"
+
+
+class TestUploadImageBinary:
+    @patch("linkedin_mcp.api.httpx.put")
+    def test_uploads_file_bytes(self, mock_put, tmp_path):
+        img = tmp_path / "test.png"
+        img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+        mock_put.return_value = MagicMock(status_code=201)
+        mock_put.return_value.raise_for_status = MagicMock()
+
+        api._upload_image_binary("token", "https://upload.example.com", str(img))
+        mock_put.assert_called_once()
+        assert mock_put.call_args[1]["content"] == img.read_bytes()
+
+
+class TestCreateImagePost:
+    @patch("linkedin_mcp.api.httpx.post")
+    @patch("linkedin_mcp.api._upload_image_binary")
+    @patch("linkedin_mcp.api._register_image_upload")
+    def test_full_image_post_flow(self, mock_register, mock_upload, mock_post):
+        mock_register.return_value = ("https://upload.example.com", "urn:li:digitalmediaAsset:x")
+        mock_post.return_value = MagicMock(
+            status_code=201,
+            headers={"X-RestLi-Id": "urn:li:share:img1"},
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        result = api.create_image_post("token", "p1", "Photo!", "/pic.jpg")
+        assert result.urn == "urn:li:share:img1"
+        assert result.status == "created"
+        mock_register.assert_called_once_with("token", "p1")
+        mock_upload.assert_called_once_with("token", "https://upload.example.com", "/pic.jpg")
+
+    @patch("linkedin_mcp.api.httpx.post")
+    @patch("linkedin_mcp.api._upload_image_binary")
+    @patch("linkedin_mcp.api._register_image_upload")
+    def test_image_post_with_title_and_description(self, mock_register, mock_upload, mock_post):
+        mock_register.return_value = ("https://upload.example.com", "urn:li:digitalmediaAsset:x")
+        mock_post.return_value = MagicMock(
+            status_code=201,
+            headers={"X-RestLi-Id": "urn:li:share:img2"},
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        result = api.create_image_post(
+            "token", "p1", "Photo!", "/pic.jpg",
+            title="My Title", description="My Desc",
+        )
+        assert result.urn == "urn:li:share:img2"
+        body = mock_post.call_args[1]["json"]
+        media = body["specificContent"]["com.linkedin.ugc.ShareContent"]["media"]
+        assert media[0]["title"]["text"] == "My Title"
+        assert media[0]["description"]["text"] == "My Desc"
+
+
+class TestLinkPreview:
+    def test_summary_with_all_fields(self):
+        preview = api.LinkPreview(
+            url="https://example.com",
+            title="Example Title",
+            description="A great page",
+            image="https://example.com/img.jpg",
+            site_name="Example.com",
+        )
+        text = preview.summary()
+        assert "Example Title" in text
+        assert "A great page" in text
+        assert "img.jpg" in text
+        assert "Example.com" in text
+
+    def test_summary_no_og_data(self):
+        preview = api.LinkPreview(url="https://example.com")
+        text = preview.summary()
+        assert "No Open Graph metadata" in text
+
+    @patch("linkedin_mcp.api.httpx.get")
+    def test_fetch_parses_og_tags(self, mock_get):
+        html = """
+        <html><head>
+        <meta property="og:title" content="Test Page">
+        <meta property="og:description" content="A test description">
+        <meta property="og:image" content="https://img.example.com/pic.jpg">
+        <meta property="og:site_name" content="TestSite">
+        </head></html>
+        """
+        mock_get.return_value = MagicMock(status_code=200, text=html)
+        mock_get.return_value.raise_for_status = MagicMock()
+
+        preview = api.fetch_link_preview("https://example.com")
+        assert preview.title == "Test Page"
+        assert preview.description == "A test description"
+        assert preview.image == "https://img.example.com/pic.jpg"
+        assert preview.site_name == "TestSite"
+
+    @patch("linkedin_mcp.api.httpx.get")
+    def test_fetch_handles_reversed_meta_attr_order(self, mock_get):
+        html = '<html><head><meta content="Reversed Title" property="og:title"></head></html>'
+        mock_get.return_value = MagicMock(status_code=200, text=html)
+        mock_get.return_value.raise_for_status = MagicMock()
+
+        preview = api.fetch_link_preview("https://example.com")
+        assert preview.title == "Reversed Title"
+
+    @patch("linkedin_mcp.api.httpx.get")
+    def test_fetch_handles_no_og_tags(self, mock_get):
+        mock_get.return_value = MagicMock(status_code=200, text="<html><body>Plain page</body></html>")
+        mock_get.return_value.raise_for_status = MagicMock()
+
+        preview = api.fetch_link_preview("https://example.com")
+        assert preview.title == ""
+        assert preview.description == ""
+
+    @patch("linkedin_mcp.api.httpx.get")
+    def test_fetch_handles_http_error(self, mock_get):
+        mock_get.side_effect = api.httpx.HTTPError("Connection refused")
+        preview = api.fetch_link_preview("https://broken.example.com")
+        assert "Could not fetch" in preview.description
+
+
 class TestHeaders:
     def test_includes_bearer_and_restli(self):
         h = api._headers("my_token")

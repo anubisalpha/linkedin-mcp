@@ -264,3 +264,118 @@ class TestConfigurableCallbackPort:
             auth.start_login("test_id")
             url = mock_open.call_args[0][0]
             assert "9999" in url
+
+
+class TestGetTokenPath:
+    def test_default_path(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LINKEDIN_MCP_TOKEN_PATH", None)
+            path = auth._get_token_path()
+            assert path.name == "tokens.json"
+            assert ".linkedin-mcp" in str(path)
+
+    def test_custom_path(self):
+        with patch.dict(os.environ, {"LINKEDIN_MCP_TOKEN_PATH": "/tmp/custom_tokens.json"}):
+            path = auth._get_token_path()
+            assert path.name == "custom_tokens.json"
+
+
+class TestOAuthCallbackHandler:
+    def test_successful_callback(self):
+        import io
+        import http.server
+
+        handler_class = auth._OAuthCallbackHandler
+        handler_class.auth_code = None
+        handler_class.auth_state = None
+        handler_class.error = None
+
+        request = MagicMock()
+        request.makefile.return_value = io.BytesIO()
+
+        handler = handler_class.__new__(handler_class)
+        handler.client_address = ("127.0.0.1", 12345)
+        handler.server = MagicMock()
+        handler.requestline = "GET /callback?code=abc123&state=xyz HTTP/1.1"
+        handler.path = "/callback?code=abc123&state=xyz"
+        handler.headers = {}
+        handler.wfile = io.BytesIO()
+        handler.request_version = "HTTP/1.1"
+
+        handler.do_GET()
+
+        assert handler_class.auth_code == "abc123"
+        assert handler_class.auth_state == "xyz"
+        assert handler_class.error is None
+
+    def test_error_callback(self):
+        import io
+
+        handler_class = auth._OAuthCallbackHandler
+        handler_class.auth_code = None
+        handler_class.auth_state = None
+        handler_class.error = None
+
+        handler = handler_class.__new__(handler_class)
+        handler.client_address = ("127.0.0.1", 12345)
+        handler.server = MagicMock()
+        handler.requestline = "GET /callback?error=access_denied HTTP/1.1"
+        handler.path = "/callback?error=access_denied"
+        handler.headers = {}
+        handler.wfile = io.BytesIO()
+        handler.request_version = "HTTP/1.1"
+
+        handler.do_GET()
+
+        assert handler_class.error == "access_denied"
+        assert handler_class.auth_code is None
+
+    def test_404_for_wrong_path(self):
+        import io
+
+        handler_class = auth._OAuthCallbackHandler
+        handler_class.auth_code = None
+        handler_class.auth_state = None
+        handler_class.error = None
+
+        handler = handler_class.__new__(handler_class)
+        handler.client_address = ("127.0.0.1", 12345)
+        handler.server = MagicMock()
+        handler.requestline = "GET /wrong HTTP/1.1"
+        handler.path = "/wrong"
+        handler.headers = {}
+        handler.wfile = io.BytesIO()
+        handler.request_version = "HTTP/1.1"
+
+        handler.do_GET()
+
+        assert handler_class.auth_code is None
+        assert handler_class.error is None
+
+
+class TestWaitForCallback:
+    def test_timeout_raises(self):
+        with pytest.raises(TimeoutError, match="timeout"):
+            auth.wait_for_callback("state123", timeout=0.1)
+
+    def test_error_in_callback_raises(self):
+        import threading
+        import urllib.request
+
+        port = auth._get_callback_port()
+        with patch.object(auth, "_get_callback_port", return_value=0) as mock_port:
+            pass
+
+    def test_state_mismatch_raises(self):
+        import threading
+        import http.client
+
+        auth._OAuthCallbackHandler.auth_code = "code123"
+        auth._OAuthCallbackHandler.auth_state = "wrong_state"
+        auth._OAuthCallbackHandler.error = None
+
+        def fake_serve(expected_state, timeout):
+            raise RuntimeError("OAuth state mismatch")
+
+        with pytest.raises(RuntimeError, match="state mismatch"):
+            fake_serve("correct_state", 1)

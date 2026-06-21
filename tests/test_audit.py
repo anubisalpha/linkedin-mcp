@@ -1,6 +1,7 @@
 """Tests for linkedin_mcp.audit — NDJSON audit logging."""
 
 import json
+import os
 from unittest.mock import patch
 
 import pytest
@@ -62,3 +63,17 @@ class TestAuditLog:
         mock_path.return_value = tmp_path / "deep" / "nested" / "audit.log"
         audit.log("test", "tool", "content")
         assert (tmp_path / "deep" / "nested" / "audit.log").exists()
+
+
+class TestGetLogPath:
+    def test_default_path(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LINKEDIN_MCP_AUDIT_PATH", None)
+            path = audit._get_log_path()
+            assert path.name == "audit.log"
+            assert ".linkedin-mcp" in str(path)
+
+    def test_custom_path(self):
+        with patch.dict(os.environ, {"LINKEDIN_MCP_AUDIT_PATH": "/tmp/my_audit.log"}):
+            path = audit._get_log_path()
+            assert path.name == "my_audit.log"

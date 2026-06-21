@@ -1,11 +1,36 @@
 from __future__ import annotations
 
 import os
+import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
 
 from .models import PostResult, Profile
+
+
+@dataclass
+class LinkPreview:
+    url: str
+    title: str = ""
+    description: str = ""
+    image: str = ""
+    site_name: str = ""
+
+    def summary(self) -> str:
+        lines = [f"Link preview for: {self.url}", ""]
+        if self.site_name:
+            lines.append(f"Site: {self.site_name}")
+        if self.title:
+            lines.append(f"Title: {self.title}")
+        if self.description:
+            lines.append(f"Description: {self.description}")
+        if self.image:
+            lines.append(f"Image: {self.image}")
+        if not self.title and not self.description:
+            lines.append("No Open Graph metadata found — LinkedIn may show a plain URL card.")
+        return "\n".join(lines)
 
 DEFAULT_APPROVAL_STAMP = "\n\n—\nAI-drafted · Human-approved · Posted via LinkedIn MCP"
 
@@ -202,3 +227,51 @@ def delete_post(access_token: str, post_urn: str) -> PostResult:
     )
     resp.raise_for_status()
     return PostResult(urn=post_urn, status="deleted", message=f"Post deleted: {post_urn}")
+
+
+_OG_PATTERN = re.compile(
+    r'<meta\s+(?:[^>]*?\s+)?'
+    r'(?:property|name)=["\']og:(\w+)["\']'
+    r'\s+content=["\']([^"\']*)["\']',
+    re.IGNORECASE,
+)
+_OG_PATTERN_REVERSED = re.compile(
+    r'<meta\s+(?:[^>]*?\s+)?'
+    r'content=["\']([^"\']*)["\']'
+    r'\s+(?:[^>]*?\s+)?'
+    r'(?:property|name)=["\']og:(\w+)["\']',
+    re.IGNORECASE,
+)
+
+
+def fetch_link_preview(url: str) -> LinkPreview:
+    """Fetch Open Graph metadata from a URL to preview how LinkedIn will render it."""
+    try:
+        resp = httpx.get(
+            url,
+            follow_redirects=True,
+            timeout=15,
+            headers={"User-Agent": "LinkedInBot/1.0"},
+        )
+        resp.raise_for_status()
+    except httpx.HTTPError as e:
+        return LinkPreview(url=url, description=f"Could not fetch URL: {e}")
+
+    html = resp.text[:50000]
+    og: dict[str, str] = {}
+    for match in _OG_PATTERN.finditer(html):
+        prop, content = match.group(1).lower(), match.group(2)
+        if prop not in og:
+            og[prop] = content
+    for match in _OG_PATTERN_REVERSED.finditer(html):
+        content, prop = match.group(1), match.group(2).lower()
+        if prop not in og:
+            og[prop] = content
+
+    return LinkPreview(
+        url=url,
+        title=og.get("title", ""),
+        description=og.get("description", ""),
+        image=og.get("image", ""),
+        site_name=og.get("site_name", ""),
+    )

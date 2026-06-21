@@ -16,14 +16,20 @@ from linkedin_mcp.server import (
     _char_count_line,
     _check_scopes,
     _find_last_published_urn,
+    _get_credentials,
     _handle_article_post,
+    _handle_audit_log,
     _handle_delete_post,
     _handle_health,
+    _handle_image_post,
     _handle_login,
     _handle_logout,
     _handle_profile,
     _handle_status,
     _handle_text_post,
+    _handle_link_preview,
+    _handle_post_history,
+    _handle_setup,
     _handle_undo_last_post,
     _require_token,
     call_tool,
@@ -62,7 +68,7 @@ class TestListTools:
         assert "linkedin_create_image_post" in names
         assert "linkedin_delete_post" in names
         assert "linkedin_undo_last_post" in names
-        assert len(tools) == 11
+        assert len(tools) == 14
 
     @pytest.mark.asyncio
     async def test_all_schemas_have_additional_properties_false(self):
@@ -526,3 +532,345 @@ class TestCheckScopes:
         mock_audit_path.return_value = tmp_path / "audit.log"
         result = await _handle_health()
         assert "[FAIL] Scopes: Missing" in result.content[0].text
+
+
+class TestGetCredentials:
+    def test_returns_credentials_when_set(self):
+        with patch.dict(os.environ, {"LINKEDIN_CLIENT_ID": "cid", "LINKEDIN_CLIENT_SECRET": "csec"}):
+            assert _get_credentials() == ("cid", "csec")
+
+    def test_raises_when_missing(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with pytest.raises(RuntimeError, match="LINKEDIN_CLIENT_ID"):
+                _get_credentials()
+
+    def test_raises_when_empty(self):
+        with patch.dict(os.environ, {"LINKEDIN_CLIENT_ID": "", "LINKEDIN_CLIENT_SECRET": "sec"}):
+            with pytest.raises(RuntimeError):
+                _get_credentials()
+
+
+class TestCallToolRouting:
+    """Ensure call_tool routes every tool name to its handler."""
+
+    @pytest.mark.asyncio
+    async def test_routes_login(self):
+        with patch("linkedin_mcp.server._handle_login") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            result = await call_tool("linkedin_login", {})
+            m.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_routes_logout(self):
+        with patch("linkedin_mcp.server._handle_logout") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            await call_tool("linkedin_logout", {})
+            m.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_routes_status(self):
+        with patch("linkedin_mcp.server._handle_status") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            await call_tool("linkedin_status", {})
+            m.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_routes_profile(self):
+        with patch("linkedin_mcp.server._handle_profile") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            await call_tool("linkedin_profile", {})
+            m.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_routes_audit_log(self):
+        with patch("linkedin_mcp.server._handle_audit_log") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            await call_tool("linkedin_audit_log", {"limit": 5})
+            m.assert_called_once_with({"limit": 5})
+
+    @pytest.mark.asyncio
+    async def test_routes_health(self):
+        with patch("linkedin_mcp.server._handle_health") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            await call_tool("linkedin_health", {})
+            m.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_routes_text_post(self):
+        with patch("linkedin_mcp.server._handle_text_post") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            await call_tool("linkedin_create_text_post", {"text": "hi"})
+            m.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_routes_article_post(self):
+        with patch("linkedin_mcp.server._handle_article_post") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            await call_tool("linkedin_create_article_post", {"text": "hi", "url": "http://x"})
+            m.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_routes_image_post(self):
+        with patch("linkedin_mcp.server._handle_image_post") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            await call_tool("linkedin_create_image_post", {"text": "hi", "image_path": "/x.png"})
+            m.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_routes_delete_post(self):
+        with patch("linkedin_mcp.server._handle_delete_post") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            await call_tool("linkedin_delete_post", {"post_urn": "urn:li:share:1"})
+            m.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_exception_returns_error(self):
+        with patch("linkedin_mcp.server._handle_login", side_effect=RuntimeError("boom")):
+            result = await call_tool("linkedin_login", {})
+            assert result.isError is True
+            assert "boom" in result.content[0].text
+
+
+class TestHandleAuditLog:
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.audit._get_log_path")
+    async def test_no_log_file(self, mock_path, tmp_path):
+        mock_path.return_value = tmp_path / "nope.log"
+        result = await _handle_audit_log({})
+        assert "No audit log entries" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.audit._get_log_path")
+    async def test_formats_entries(self, mock_path, tmp_path):
+        log = tmp_path / "audit.log"
+        entry = json.dumps({
+            "timestamp": "2026-06-01T12:00:00+00:00",
+            "action": "published",
+            "tool": "linkedin_create_text_post",
+            "content_summary": "Hello world",
+            "result": "urn:li:share:1",
+        })
+        log.write_text(entry + "\n", encoding="utf-8")
+        mock_path.return_value = log
+
+        result = await _handle_audit_log({})
+        text = result.content[0].text
+        assert "PUBLISHED" in text
+        assert "create_text_post" in text
+        assert "Hello world" in text
+        assert "urn:li:share:1" in text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.audit._get_log_path")
+    async def test_respects_limit(self, mock_path, tmp_path):
+        log = tmp_path / "audit.log"
+        lines = []
+        for i in range(10):
+            lines.append(json.dumps({
+                "timestamp": f"2026-06-01T12:0{i}:00+00:00",
+                "action": "preview",
+                "tool": "linkedin_create_text_post",
+                "content_summary": f"entry {i}",
+            }))
+        log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        mock_path.return_value = log
+
+        result = await _handle_audit_log({"limit": 3})
+        text = result.content[0].text
+        assert text.count("\n") == 2  # 3 lines = 2 newlines
+
+
+class TestHandleImagePost:
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_preview_mode(self, mock_load):
+        mock_load.return_value = _make_token()
+        result = await _handle_image_post({"text": "Photo post", "image_path": "/pic.jpg"})
+        text = result.content[0].text
+        assert "PREVIEW" in text
+        assert "Photo post" in text
+        assert "/pic.jpg" in text
+        assert "Characters:" in text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_preview_with_title_and_description(self, mock_load):
+        mock_load.return_value = _make_token()
+        result = await _handle_image_post({
+            "text": "Photo",
+            "image_path": "/pic.jpg",
+            "title": "My Photo",
+            "description": "Nice one",
+        })
+        text = result.content[0].text
+        assert "My Photo" in text
+        assert "Nice one" in text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.api.create_image_post")
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_confirm_publishes(self, mock_load, mock_create):
+        mock_load.return_value = _make_token()
+        mock_create.return_value = PostResult(
+            urn="urn:li:share:img1", status="created", message="Image post published: urn:li:share:img1"
+        )
+        result = await _handle_image_post({"text": "Photo", "image_path": "/pic.jpg", "confirm": True})
+        assert "published" in result.content[0].text.lower()
+        mock_create.assert_called_once()
+
+
+class TestHandleArticlePostConfirm:
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.api.create_article_post")
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_confirm_publishes(self, mock_load, mock_create):
+        mock_load.return_value = _make_token()
+        mock_create.return_value = PostResult(
+            urn="urn:li:share:art1", status="created", message="Article shared: urn:li:share:art1"
+        )
+        result = await _handle_article_post({
+            "text": "Check this",
+            "url": "https://example.com",
+            "confirm": True,
+        })
+        assert "shared" in result.content[0].text.lower()
+        mock_create.assert_called_once()
+
+
+class TestHandlePostHistory:
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.history.get_history")
+    async def test_empty_history(self, mock_hist):
+        mock_hist.return_value = []
+        result = await _handle_post_history({})
+        assert "No posts" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.history.get_history")
+    async def test_empty_filtered(self, mock_hist):
+        mock_hist.return_value = []
+        result = await _handle_post_history({"type": "article"})
+        assert "No article posts" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.history.get_history")
+    async def test_shows_entries(self, mock_hist):
+        mock_hist.return_value = [
+            {
+                "urn": "urn:li:share:1",
+                "type": "text",
+                "content": "Hello world",
+                "visibility": "PUBLIC",
+                "timestamp": "2026-06-01T12:00:00+00:00",
+            },
+            {
+                "urn": "urn:li:share:2",
+                "type": "article",
+                "content": "Check this",
+                "visibility": "CONNECTIONS",
+                "timestamp": "2026-06-02T12:00:00+00:00",
+                "url": "https://example.com",
+            },
+        ]
+        result = await _handle_post_history({})
+        text = result.content[0].text
+        assert "2 posts" in text
+        assert "TEXT" in text
+        assert "ARTICLE" in text
+        assert "urn:li:share:1" in text
+        assert "https://example.com" in text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.history.get_history")
+    async def test_passes_limit_and_type(self, mock_hist):
+        mock_hist.return_value = []
+        await _handle_post_history({"limit": 5, "type": "image"})
+        mock_hist.assert_called_once_with(5, "image")
+
+
+class TestHandleLinkPreview:
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.api.fetch_link_preview")
+    async def test_returns_preview(self, mock_fetch):
+        from linkedin_mcp.api import LinkPreview
+        mock_fetch.return_value = LinkPreview(
+            url="https://example.com",
+            title="Example",
+            description="An example page",
+            site_name="Example.com",
+        )
+        result = await _handle_link_preview({"url": "https://example.com"})
+        text = result.content[0].text
+        assert "Example" in text
+        assert "example.com" in text.lower()
+
+
+class TestHandleSetup:
+    @pytest.mark.asyncio
+    async def test_missing_credentials(self):
+        with patch.dict(os.environ, {}, clear=True):
+            result = await _handle_setup()
+            text = result.content[0].text
+            assert "MISSING" in text
+            assert "linkedin.com/developers" in text
+            assert ".mcp.json" in text
+
+    @pytest.mark.asyncio
+    async def test_credentials_present_no_token(self):
+        with patch.dict(os.environ, {"LINKEDIN_CLIENT_ID": "cid", "LINKEDIN_CLIENT_SECRET": "csec"}):
+            with patch("linkedin_mcp.server.auth.load_token", return_value=None):
+                result = await _handle_setup()
+                text = result.content[0].text
+                assert "[OK]   Client ID" in text
+                assert "Not logged in" in text
+                assert "linkedin_login" in text
+
+    @pytest.mark.asyncio
+    async def test_fully_configured(self):
+        with patch.dict(os.environ, {"LINKEDIN_CLIENT_ID": "cid", "LINKEDIN_CLIENT_SECRET": "csec"}):
+            with patch("linkedin_mcp.server.auth.load_token", return_value=_make_token()):
+                result = await _handle_setup()
+                text = result.content[0].text
+                assert "[OK]   Client ID" in text
+                assert "Logged in" in text
+                assert "ready to use" in text.lower()
+
+    @pytest.mark.asyncio
+    async def test_shows_redirect_url(self):
+        with patch.dict(os.environ, {"LINKEDIN_CLIENT_ID": "cid", "LINKEDIN_CLIENT_SECRET": "csec"}):
+            with patch("linkedin_mcp.server.auth.load_token", return_value=None):
+                result = await _handle_setup()
+                assert "localhost" in result.content[0].text
+                assert "/callback" in result.content[0].text
+
+    @pytest.mark.asyncio
+    async def test_shows_optional_env_vars(self):
+        with patch.dict(os.environ, {"LINKEDIN_CLIENT_ID": "cid", "LINKEDIN_CLIENT_SECRET": "csec"}):
+            with patch("linkedin_mcp.server.auth.load_token", return_value=None):
+                result = await _handle_setup()
+                text = result.content[0].text
+                assert "LINKEDIN_MCP_ENCRYPTION_KEY" in text
+                assert "LINKEDIN_MCP_HISTORY_PATH" in text
+
+
+class TestCallToolRoutingNewTools:
+    @pytest.mark.asyncio
+    async def test_routes_post_history(self):
+        with patch("linkedin_mcp.server._handle_post_history") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            await call_tool("linkedin_post_history", {})
+            m.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_routes_link_preview(self):
+        with patch("linkedin_mcp.server._handle_link_preview") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            await call_tool("linkedin_link_preview", {"url": "https://x.com"})
+            m.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_routes_setup(self):
+        with patch("linkedin_mcp.server._handle_setup") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            await call_tool("linkedin_setup", {})
+            m.assert_called_once()

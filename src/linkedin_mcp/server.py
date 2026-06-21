@@ -10,7 +10,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, TextContent, Tool
 
-from . import api, audit, auth
+from . import api, audit, auth, history
 from .api import _get_approval_stamp
 from .models import TokenData
 
@@ -18,7 +18,7 @@ LINKEDIN_POST_CHAR_LIMIT = 3000
 
 server = Server(
     "linkedin-mcp",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 CONFIRM_DESCRIPTION = (
@@ -299,6 +299,64 @@ async def list_tools() -> list[Tool]:
                 "additionalProperties": False,
             },
         ),
+        Tool(
+            name="linkedin_post_history",
+            description=(
+                "View your post history — all posts published through this server with "
+                "their URNs, timestamps, content, and visibility. Optionally filter by type."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Number of recent posts to show. Defaults to 20.",
+                        "default": 20,
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": ["text", "article", "image"],
+                        "description": "Filter by post type. Omit to show all types.",
+                        "default": "",
+                    },
+                },
+                "required": [],
+                "additionalProperties": False,
+            },
+        ),
+        Tool(
+            name="linkedin_link_preview",
+            description=(
+                "Fetch Open Graph metadata from a URL to see how LinkedIn will display it "
+                "in the feed. Shows title, description, image, and site name. Use before "
+                "sharing an article to check the link card looks right."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The URL to preview.",
+                    },
+                },
+                "required": ["url"],
+                "additionalProperties": False,
+            },
+        ),
+        Tool(
+            name="linkedin_setup",
+            description=(
+                "First-run setup assistant. Checks your configuration and walks you through "
+                "any missing steps: credentials, LinkedIn Developer App, redirect URL, OAuth "
+                "products, and first login. Run this when setting up the server for the first time."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+        ),
     ]
 
 
@@ -327,6 +385,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             return await _handle_delete_post(arguments)
         elif name == "linkedin_undo_last_post":
             return await _handle_undo_last_post(arguments)
+        elif name == "linkedin_post_history":
+            return await _handle_post_history(arguments)
+        elif name == "linkedin_link_preview":
+            return await _handle_link_preview(arguments)
+        elif name == "linkedin_setup":
+            return await _handle_setup()
         else:
             return CallToolResult(
                 content=[TextContent(type="text", text=f"Unknown tool: {name}")],
@@ -522,6 +586,7 @@ async def _handle_text_post(args: dict[str, Any]) -> CallToolResult:
     audit.log("publish", "linkedin_create_text_post", text)
     result = api.create_text_post(token.access_token, token.sub, text, visibility)
     audit.log("published", "linkedin_create_text_post", text, result.urn)
+    history.record_post(result.urn, "text", text, visibility)
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 
@@ -555,6 +620,7 @@ async def _handle_article_post(args: dict[str, Any]) -> CallToolResult:
         visibility=visibility,
     )
     audit.log("published", "linkedin_create_article_post", f"{text} | {url}", result.urn)
+    history.record_post(result.urn, "article", text, visibility, url=url)
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 
@@ -588,6 +654,7 @@ async def _handle_image_post(args: dict[str, Any]) -> CallToolResult:
         visibility=visibility,
     )
     audit.log("published", "linkedin_create_image_post", f"{text} | {image_path}", result.urn)
+    history.record_post(result.urn, "image", text, visibility, image_path=image_path)
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 
@@ -603,6 +670,7 @@ async def _handle_delete_post(args: dict[str, Any]) -> CallToolResult:
     audit.log("delete", "linkedin_delete_post", post_urn)
     result = api.delete_post(token.access_token, post_urn)
     audit.log("deleted", "linkedin_delete_post", post_urn)
+    history.delete_from_history(post_urn)
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 
@@ -645,8 +713,166 @@ async def _handle_undo_last_post(args: dict[str, Any]) -> CallToolResult:
     audit.log("undo", "linkedin_undo_last_post", post_urn)
     result = api.delete_post(token.access_token, post_urn)
     audit.log("undone", "linkedin_undo_last_post", post_urn)
+    history.delete_from_history(post_urn)
     return CallToolResult(
         content=[TextContent(type="text", text=f"Undo complete — {result.message}")]
+    )
+
+
+async def _handle_post_history(args: dict[str, Any]) -> CallToolResult:
+    limit = args.get("limit", 20)
+    post_type = args.get("type", "")
+    entries = history.get_history(limit, post_type)
+    if not entries:
+        msg = "No posts in history yet."
+        if post_type:
+            msg = f"No {post_type} posts in history."
+        return CallToolResult(content=[TextContent(type="text", text=msg)])
+
+    lines = []
+    for entry in entries:
+        ts = entry["timestamp"][:19].replace("T", " ")
+        ptype = entry.get("type", "unknown").upper()
+        vis = entry.get("visibility", "PUBLIC")
+        content = entry.get("content", "")[:80]
+        urn = entry.get("urn", "")
+        row = f"[{ts}] {ptype:7s} ({vis}) {content}"
+        if urn:
+            row += f"\n         URN: {urn}"
+        url = entry.get("url", "")
+        if url:
+            row += f"\n         URL: {url}"
+        lines.append(row)
+
+    header = f"Post history ({len(entries)} posts)"
+    if post_type:
+        header += f" — filtered: {post_type}"
+    return CallToolResult(
+        content=[TextContent(type="text", text=f"{header}\n\n" + "\n\n".join(lines))]
+    )
+
+
+async def _handle_link_preview(args: dict[str, Any]) -> CallToolResult:
+    url = args["url"]
+    preview = api.fetch_link_preview(url)
+    return CallToolResult(content=[TextContent(type="text", text=preview.summary())])
+
+
+async def _handle_setup() -> CallToolResult:
+    steps: list[str] = []
+    all_ok = True
+
+    steps.append("LinkedIn MCP Server — Setup Check")
+    steps.append("=" * 40)
+    steps.append("")
+
+    # 1. Credentials
+    client_id = os.environ.get("LINKEDIN_CLIENT_ID", "")
+    client_secret = os.environ.get("LINKEDIN_CLIENT_SECRET", "")
+
+    if client_id and client_secret:
+        steps.append(f"[OK]   Client ID: {client_id[:8]}...")
+        steps.append("[OK]   Client Secret: configured")
+    else:
+        all_ok = False
+        steps.append("[MISSING] LinkedIn API credentials not configured")
+        steps.append("")
+        steps.append("To fix this:")
+        steps.append("1. Go to https://www.linkedin.com/developers/apps")
+        steps.append("2. Click 'Create app' (or select an existing app)")
+        steps.append("3. Copy the Client ID and Client Secret from the Auth tab")
+        steps.append("4. Add them to your MCP configuration:")
+        steps.append("")
+        steps.append('   In .mcp.json (or ~/.claude/.mcp.json):')
+        steps.append('   {')
+        steps.append('     "mcpServers": {')
+        steps.append('       "linkedin": {')
+        steps.append('         "command": "python",')
+        steps.append('         "args": ["-m", "linkedin_mcp.server"],')
+        steps.append('         "env": {')
+        steps.append('           "LINKEDIN_CLIENT_ID": "your_client_id",')
+        steps.append('           "LINKEDIN_CLIENT_SECRET": "your_client_secret"')
+        steps.append("         }")
+        steps.append("       }")
+        steps.append("     }")
+        steps.append("   }")
+        steps.append("")
+        steps.append("   IMPORTANT: Use literal values, not ${VAR} references.")
+        steps.append("   Restart Claude Code after updating .mcp.json.")
+        return CallToolResult(
+            content=[TextContent(type="text", text="\n".join(steps))]
+        )
+
+    # 2. LinkedIn Developer App products
+    steps.append("")
+    steps.append("Required LinkedIn Developer App products:")
+    steps.append("  - 'Sign in with LinkedIn using OpenID Connect' (scopes: openid, profile, email)")
+    steps.append("  - 'Share on LinkedIn' (scope: w_member_social)")
+    steps.append("  Enable both on the Products tab of your app at:")
+    steps.append("  https://www.linkedin.com/developers/apps")
+    steps.append("  Both are self-serve and activate immediately.")
+
+    # 3. Redirect URL
+    port = auth._get_callback_port()
+    redirect_uri = auth._get_redirect_uri()
+    steps.append("")
+    steps.append(f"[INFO] Redirect URL must be set in your LinkedIn app's Auth tab:")
+    steps.append(f"       {redirect_uri}")
+    if port != 8585:
+        steps.append(f"       (Using custom port {port} from LINKEDIN_MCP_CALLBACK_PORT)")
+
+    # 4. Token status
+    steps.append("")
+    token = auth.load_token()
+    if token and not token.is_expired():
+        steps.append(f"[OK]   Logged in as member: {token.sub}")
+        steps.append(f"       Token valid for {token.days_remaining()} more days")
+        steps.append(f"       Scopes: {token.scope}")
+
+        granted = set(token.scope.split()) if token.scope else set()
+        missing = REQUIRED_SCOPES - granted
+        if missing:
+            all_ok = False
+            steps.append(f"[WARN] Missing scopes: {', '.join(sorted(missing))}")
+            steps.append("       Enable the required products on your LinkedIn app, then re-login.")
+    elif token and token.is_expired():
+        all_ok = False
+        steps.append("[WARN] Token expired")
+        if token.refresh_token:
+            steps.append("       A refresh token is available — it will auto-refresh on next API call.")
+        else:
+            steps.append("       Run linkedin_login to re-authenticate.")
+    else:
+        all_ok = False
+        steps.append("[NEXT] Not logged in yet")
+        steps.append("       Run linkedin_login to authenticate with LinkedIn.")
+
+    # 5. Optional config
+    steps.append("")
+    steps.append("Optional configuration:")
+    env_vars = {
+        "LINKEDIN_MCP_APPROVAL_STAMP": "Custom approval stamp text",
+        "LINKEDIN_MCP_ENCRYPTION_KEY": "Custom encryption key for token portability",
+        "LINKEDIN_MCP_CALLBACK_PORT": f"OAuth callback port (current: {port})",
+        "LINKEDIN_MCP_TOKEN_PATH": "Custom token storage path",
+        "LINKEDIN_MCP_AUDIT_PATH": "Custom audit log path",
+        "LINKEDIN_MCP_HISTORY_PATH": "Custom post history path",
+    }
+    for var, desc in env_vars.items():
+        val = os.environ.get(var)
+        status = "set" if val else "default"
+        steps.append(f"  {var}: {status} — {desc}")
+
+    # Summary
+    steps.append("")
+    steps.append("=" * 40)
+    if all_ok:
+        steps.append("Setup complete — ready to use!")
+    else:
+        steps.append("Follow the steps above to complete setup.")
+
+    return CallToolResult(
+        content=[TextContent(type="text", text="\n".join(steps))]
     )
 
 

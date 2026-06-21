@@ -413,13 +413,27 @@ async def _handle_health() -> CallToolResult:
     # 4. Encryption check
     checks.append("[OK]   Encryption: Tokens encrypted at rest")
 
-    # 5. Audit log check
+    # 5. Audit log check and daily usage
     audit_path = audit._get_log_path()
     if audit_path.exists():
-        line_count = len(audit_path.read_text(encoding="utf-8").strip().splitlines())
-        checks.append(f"[OK]   Audit: {line_count} entries logged")
+        lines = audit_path.read_text(encoding="utf-8").strip().splitlines()
+        checks.append(f"[OK]   Audit: {len(lines)} entries logged")
+
+        from datetime import datetime, timezone
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        posts_today = sum(
+            1 for line in lines
+            if line.startswith("{")
+            and f'"action": "published"' in line
+            and today in line
+        )
+        if posts_today >= 120:
+            checks.append(f"[WARN] Usage: {posts_today}/150 posts today — approaching daily limit")
+        else:
+            checks.append(f"[OK]   Usage: {posts_today}/150 posts today")
     else:
         checks.append("[INFO] Audit: No entries yet")
+        checks.append("[OK]   Usage: 0/150 posts today")
 
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(checks))]

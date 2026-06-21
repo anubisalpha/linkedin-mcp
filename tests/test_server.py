@@ -249,6 +249,11 @@ class TestHandleDeletePost:
 
 
 class TestHandleHealth:
+    def _audit_entry(self, action="published", today=True):
+        from datetime import datetime, timezone
+        ts = datetime.now(timezone.utc).isoformat() if today else "2020-01-01T00:00:00+00:00"
+        return json.dumps({"timestamp": ts, "action": action, "tool": "linkedin_create_text_post", "content_summary": "test"})
+
     @pytest.mark.asyncio
     @patch("linkedin_mcp.server.audit._get_log_path")
     @patch("linkedin_mcp.server.httpx.get")
@@ -258,7 +263,8 @@ class TestHandleHealth:
         mock_load.return_value = _make_token()
         mock_get.return_value = MagicMock(status_code=200)
         audit_path = tmp_path / "audit.log"
-        audit_path.write_text('{"line": 1}\n{"line": 2}\n', encoding="utf-8")
+        lines = [self._audit_entry("preview"), self._audit_entry("published")]
+        audit_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         mock_audit_path.return_value = audit_path
 
         result = await _handle_health()
@@ -267,6 +273,46 @@ class TestHandleHealth:
         assert "Token: Valid" in text
         assert "API" in text
         assert "2 entries" in text
+        assert "1/150 posts today" in text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.audit._get_log_path")
+    @patch("linkedin_mcp.server.httpx.get")
+    @patch("linkedin_mcp.server._get_credentials", return_value=("id", "secret"))
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_usage_warning_at_threshold(self, mock_load, mock_creds, mock_get, mock_audit_path, tmp_path):
+        mock_load.return_value = _make_token()
+        mock_get.return_value = MagicMock(status_code=200)
+        audit_path = tmp_path / "audit.log"
+        lines = [self._audit_entry("published") for _ in range(125)]
+        audit_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        mock_audit_path.return_value = audit_path
+
+        result = await _handle_health()
+        text = result.content[0].text
+        assert "[WARN] Usage: 125/150" in text
+        assert "approaching daily limit" in text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.audit._get_log_path")
+    @patch("linkedin_mcp.server.httpx.get")
+    @patch("linkedin_mcp.server._get_credentials", return_value=("id", "secret"))
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_usage_excludes_old_entries(self, mock_load, mock_creds, mock_get, mock_audit_path, tmp_path):
+        mock_load.return_value = _make_token()
+        mock_get.return_value = MagicMock(status_code=200)
+        audit_path = tmp_path / "audit.log"
+        lines = [
+            self._audit_entry("published", today=False),
+            self._audit_entry("published", today=False),
+            self._audit_entry("published", today=True),
+        ]
+        audit_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        mock_audit_path.return_value = audit_path
+
+        result = await _handle_health()
+        text = result.content[0].text
+        assert "1/150 posts today" in text
 
     @pytest.mark.asyncio
     @patch("linkedin_mcp.server.auth.load_token")

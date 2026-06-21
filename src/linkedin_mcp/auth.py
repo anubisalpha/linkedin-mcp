@@ -16,8 +16,18 @@ AUTHORIZE_URL = "https://www.linkedin.com/oauth/v2/authorization"
 TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
 USERINFO_URL = "https://api.linkedin.com/v2/userinfo"
 SCOPES = "openid profile email w_member_social"
-CALLBACK_PORT = 8585
-REDIRECT_URI = f"http://localhost:{CALLBACK_PORT}/callback"
+DEFAULT_CALLBACK_PORT = 8585
+
+
+def _get_callback_port() -> int:
+    custom = os.environ.get("LINKEDIN_MCP_CALLBACK_PORT")
+    if custom:
+        return int(custom)
+    return DEFAULT_CALLBACK_PORT
+
+
+def _get_redirect_uri() -> str:
+    return f"http://localhost:{_get_callback_port()}/callback"
 
 
 def _get_token_path() -> pathlib.Path:
@@ -72,7 +82,7 @@ def start_login(client_id: str) -> str:
     params = {
         "response_type": "code",
         "client_id": client_id,
-        "redirect_uri": REDIRECT_URI,
+        "redirect_uri": _get_redirect_uri(),
         "state": state,
         "scope": SCOPES,
     }
@@ -90,7 +100,7 @@ def wait_for_callback(expected_state: str, timeout: float = 120) -> str:
     _OAuthCallbackHandler.auth_state = None
     _OAuthCallbackHandler.error = None
 
-    server = http.server.HTTPServer(("localhost", CALLBACK_PORT), _OAuthCallbackHandler)
+    server = http.server.HTTPServer(("localhost", _get_callback_port()), _OAuthCallbackHandler)
     server.timeout = timeout
 
     received = threading.Event()
@@ -132,7 +142,7 @@ def exchange_code(code: str, client_id: str, client_secret: str) -> TokenData:
             "code": code,
             "client_id": client_id,
             "client_secret": client_secret,
-            "redirect_uri": REDIRECT_URI,
+            "redirect_uri": _get_redirect_uri(),
         },
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )

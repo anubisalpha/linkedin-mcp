@@ -66,12 +66,14 @@ All write operations require explicit user approval before executing, keeping th
 - **MCP Inspector compatible** — All tool schemas include `additionalProperties: false` and the server declares its version for strict MCP spec compliance
 - **Scope verification** — Checks that the stored token has all required scopes before attempting API actions, failing fast with a clear message
 - **Configurable encryption key** — Optionally provide your own encryption key via environment variable for token portability between machines
+- **Configurable callback port** — Change the OAuth callback port from the default 8585 via environment variable
 - **Type checked** — Full mypy strict mode with no errors across all modules
+- **CI pipeline** — GitHub Actions runs tests and type checking on Python 3.10, 3.11, and 3.12 for every push and PR
 - **Minimal scope** — Only requests the API scopes needed (`openid`, `profile`, `email`, `w_member_social`)
 
 ### Testing
 
-The project includes a comprehensive test suite with **111 unit tests** (75% coverage) covering all modules:
+The project includes a comprehensive test suite with **115 unit tests** (75% coverage) covering all modules:
 
 ```bash
 pip install -e ".[dev]"
@@ -81,7 +83,7 @@ pytest tests/ -v
 | Test file | Tests | Coverage |
 |---|---|---|
 | `test_models.py` | 24 | Encryption, token save/load, expiry, backward compatibility, configurable key |
-| `test_auth.py` | 12 | OAuth flow, token refresh, auto-refresh logic |
+| `test_auth.py` | 16 | OAuth flow, token refresh, auto-refresh logic, configurable port |
 | `test_api.py` | 15 | Post building, approval stamp, API calls, URL encoding |
 | `test_audit.py` | 5 | NDJSON logging, truncation, directory creation |
 | `test_server.py` | 55 | All tool handlers, preview enforcement, health check, undo, char count, scope verification, MCP Inspector |
@@ -112,7 +114,7 @@ Both are self-serve and activate immediately.
 
 On the **Auth** tab:
 1. Copy your **Client ID** and **Client Secret**
-2. Under **Authorized redirect URLs for your app**, add: `http://localhost:8585/callback`
+2. Under **Authorized redirect URLs for your app**, add: `http://localhost:8585/callback` (or your custom port if using `LINKEDIN_MCP_CALLBACK_PORT`)
 
 ### 4. Privacy policy (if you need one)
 
@@ -190,6 +192,7 @@ Add to your `claude_desktop_config.json`:
 | `LINKEDIN_MCP_APPROVAL_STAMP` | No | Text appended to posts showing human approval. Set to empty string to disable. Default: `AI-drafted · Human-approved · Posted via LinkedIn MCP` |
 | `LINKEDIN_MCP_AUDIT_PATH` | No | Custom path for the audit log (default: `~/.linkedin-mcp/audit.log`) |
 | `LINKEDIN_MCP_ENCRYPTION_KEY` | No | Custom encryption key for token storage. Enables token portability between machines. When unset, uses a machine-derived key. |
+| `LINKEDIN_MCP_CALLBACK_PORT` | No | OAuth callback port (default: `8585`). Change if another service is using that port. Remember to update the redirect URL in your LinkedIn Developer App to match. |
 
 ## Usage
 

@@ -1,6 +1,7 @@
 """Tests for linkedin_mcp.auth — OAuth flow, token refresh, token persistence."""
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -238,3 +239,28 @@ class TestLogin:
         mock_start.assert_called_once_with("client_id")
         mock_wait.assert_called_once_with("state123")
         mock_exchange.assert_called_once_with("auth_code_456", "client_id", "client_secret")
+
+
+class TestConfigurableCallbackPort:
+    def test_default_port(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LINKEDIN_MCP_CALLBACK_PORT", None)
+            assert auth._get_callback_port() == 8585
+
+    def test_custom_port(self):
+        with patch.dict(os.environ, {"LINKEDIN_MCP_CALLBACK_PORT": "9090"}):
+            assert auth._get_callback_port() == 9090
+
+    def test_redirect_uri_uses_custom_port(self):
+        with patch.dict(os.environ, {"LINKEDIN_MCP_CALLBACK_PORT": "7777"}):
+            uri = auth._get_redirect_uri()
+            assert "7777" in uri
+            assert "localhost" in uri
+            assert "/callback" in uri
+
+    @patch("webbrowser.open")
+    def test_start_login_uses_custom_port(self, mock_open):
+        with patch.dict(os.environ, {"LINKEDIN_MCP_CALLBACK_PORT": "9999"}):
+            auth.start_login("test_id")
+            url = mock_open.call_args[0][0]
+            assert "9999" in url

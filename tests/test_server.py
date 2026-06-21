@@ -12,7 +12,9 @@ from mcp.types import CallToolResult, TextContent
 from linkedin_mcp.models import PostResult, Profile, TokenData
 from linkedin_mcp.server import (
     LINKEDIN_POST_CHAR_LIMIT,
+    REQUIRED_SCOPES,
     _char_count_line,
+    _check_scopes,
     _find_last_published_urn,
     _handle_article_post,
     _handle_delete_post,
@@ -470,3 +472,57 @@ class TestHandleUndoLastPost:
             result = await call_tool("linkedin_undo_last_post", {})
             mock.assert_called_once_with({})
             assert result.content[0].text == "ok"
+
+
+class TestCheckScopes:
+    def test_all_scopes_present(self):
+        token = _make_token(scope="openid profile email w_member_social")
+        _check_scopes(token)
+
+    def test_missing_scope_raises(self):
+        token = _make_token(scope="openid profile email")
+        with pytest.raises(RuntimeError, match="w_member_social"):
+            _check_scopes(token)
+
+    def test_empty_scope_passes(self):
+        token = _make_token(scope="")
+        _check_scopes(token)
+
+    def test_extra_scopes_ok(self):
+        token = _make_token(scope="openid profile email w_member_social r_liteprofile")
+        _check_scopes(token)
+
+    def test_custom_needed_scopes(self):
+        token = _make_token(scope="openid")
+        _check_scopes(token, needed={"openid"})
+
+    @patch("linkedin_mcp.server.auth.load_token")
+    def test_require_token_checks_scopes(self, mock_load):
+        token = _make_token(scope="openid profile")
+        mock_load.return_value = token
+        with pytest.raises(RuntimeError, match="missing required scope"):
+            _require_token()
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.audit._get_log_path")
+    @patch("linkedin_mcp.server.httpx.get")
+    @patch("linkedin_mcp.server._get_credentials", return_value=("id", "secret"))
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_health_shows_scope_status(self, mock_load, mock_creds, mock_get, mock_audit_path, tmp_path):
+        mock_load.return_value = _make_token()
+        mock_get.return_value = MagicMock(status_code=200)
+        mock_audit_path.return_value = tmp_path / "audit.log"
+        result = await _handle_health()
+        assert "Scopes: All required scopes granted" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.audit._get_log_path")
+    @patch("linkedin_mcp.server.httpx.get")
+    @patch("linkedin_mcp.server._get_credentials", return_value=("id", "secret"))
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_health_shows_missing_scopes(self, mock_load, mock_creds, mock_get, mock_audit_path, tmp_path):
+        mock_load.return_value = _make_token(scope="openid profile")
+        mock_get.return_value = MagicMock(status_code=200)
+        mock_audit_path.return_value = tmp_path / "audit.log"
+        result = await _handle_health()
+        assert "[FAIL] Scopes: Missing" in result.content[0].text

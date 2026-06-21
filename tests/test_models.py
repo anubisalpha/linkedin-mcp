@@ -1,12 +1,14 @@
 """Tests for linkedin_mcp.models — TokenData, Profile, PostResult."""
 
 import json
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
-from linkedin_mcp.models import PostResult, Profile, TokenData, _decrypt, _encrypt
+from linkedin_mcp.models import PostResult, Profile, TokenData, _decrypt, _derive_key, _encrypt
 
 
 class TestEncryption:
@@ -180,3 +182,43 @@ class TestPostResult:
         assert r.urn == "urn:li:share:123"
         assert r.status == "created"
         assert r.message == "Done"
+
+
+class TestConfigurableEncryptionKey:
+    def test_default_key_uses_machine_id(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("LINKEDIN_MCP_ENCRYPTION_KEY", None)
+            key = _derive_key()
+            assert len(key) == 44  # base64-encoded 32 bytes
+
+    def test_custom_key_differs_from_default(self):
+        default_key = _derive_key()
+        with patch.dict(os.environ, {"LINKEDIN_MCP_ENCRYPTION_KEY": "my-secret-key"}):
+            custom_key = _derive_key()
+        assert custom_key != default_key
+
+    def test_same_custom_key_produces_same_result(self):
+        with patch.dict(os.environ, {"LINKEDIN_MCP_ENCRYPTION_KEY": "my-secret-key"}):
+            k1 = _derive_key()
+            k2 = _derive_key()
+        assert k1 == k2
+
+    def test_round_trip_with_custom_key(self):
+        with patch.dict(os.environ, {"LINKEDIN_MCP_ENCRYPTION_KEY": "portable-key-123"}):
+            encrypted = _encrypt("token data")
+            decrypted = _decrypt(encrypted)
+        assert decrypted == "token data"
+
+    def test_token_save_load_with_custom_key(self, tmp_path: Path):
+        with patch.dict(os.environ, {"LINKEDIN_MCP_ENCRYPTION_KEY": "portable-key-456"}):
+            token = TokenData(
+                access_token="test",
+                expires_in=3600,
+                scope="openid",
+                sub="member1",
+            )
+            path = tmp_path / "tokens.json"
+            token.save(path)
+            loaded = TokenData.load(path)
+        assert loaded is not None
+        assert loaded.access_token == "test"

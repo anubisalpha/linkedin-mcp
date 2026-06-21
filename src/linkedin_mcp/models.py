@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import platform
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -12,12 +13,10 @@ from cryptography.fernet import Fernet, InvalidToken
 
 
 def _derive_key() -> bytes:
-    """Derive an encryption key from machine-specific identifiers.
-
-    This isn't meant to protect against a determined attacker with
-    local access — it prevents tokens from being readable as plain
-    text if the file is accidentally shared or committed.
-    """
+    custom = os.environ.get("LINKEDIN_MCP_ENCRYPTION_KEY")
+    if custom:
+        key_bytes = hashlib.sha256(custom.encode()).digest()
+        return base64.urlsafe_b64encode(key_bytes)
     machine_id = f"{platform.node()}-{platform.machine()}-linkedin-mcp"
     key_bytes = hashlib.sha256(machine_id.encode()).digest()
     return base64.urlsafe_b64encode(key_bytes)

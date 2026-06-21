@@ -10,3 +10,4 @@ build/
 venv/
 tokens.json
 TODO.md
+.coverage

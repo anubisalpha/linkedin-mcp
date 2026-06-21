@@ -12,6 +12,7 @@ from mcp.types import CallToolResult, TextContent, Tool
 
 from . import api, audit, auth
 from .api import _get_approval_stamp
+from .models import TokenData
 
 LINKEDIN_POST_CHAR_LIMIT = 3000
 
@@ -44,7 +45,22 @@ def _get_credentials() -> tuple[str, str]:
     return client_id, client_secret
 
 
-def _require_token() -> auth.TokenData:
+REQUIRED_SCOPES = {"openid", "profile", "email", "w_member_social"}
+
+
+def _check_scopes(token: TokenData, needed: set[str] | None = None) -> None:
+    if not token.scope:
+        return
+    granted = set(token.scope.split())
+    missing = (needed or REQUIRED_SCOPES) - granted
+    if missing:
+        raise RuntimeError(
+            f"Token is missing required scope(s): {', '.join(sorted(missing))}. "
+            "Update your LinkedIn Developer App to enable the missing products, then re-authenticate."
+        )
+
+
+def _require_token() -> TokenData:
     token = auth.load_token()
     if not token:
         raise RuntimeError("Not logged in. Use the linkedin_login tool first.")
@@ -52,12 +68,14 @@ def _require_token() -> auth.TokenData:
         client_id, client_secret = _get_credentials()
         refreshed = auth.auto_refresh(client_id, client_secret)
         if refreshed:
+            _check_scopes(refreshed)
             return refreshed
         raise RuntimeError(
             "Access token has expired. "
             + ("No refresh token available — " if not token.refresh_token else "Refresh failed — ")
             + "use linkedin_login to re-authenticate."
         )
+    _check_scopes(token)
     return token
 
 
@@ -87,7 +105,7 @@ def _preview_result(preview_text: str, post_text: str = "") -> CallToolResult:
     )
 
 
-@server.list_tools()
+@server.list_tools()  # type: ignore[no-untyped-call,untyped-decorator]
 async def list_tools() -> list[Tool]:
     return [
         Tool(
@@ -284,7 +302,7 @@ async def list_tools() -> list[Tool]:
     ]
 
 
-@server.call_tool()
+@server.call_tool()  # type: ignore[untyped-decorator]
 async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
     try:
         if name == "linkedin_login":
@@ -375,7 +393,7 @@ async def _handle_profile() -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=profile.summary())])
 
 
-async def _handle_audit_log(args: dict) -> CallToolResult:
+async def _handle_audit_log(args: dict[str, Any]) -> CallToolResult:
     limit = args.get("limit", 20)
     path = audit._get_log_path()
     if not path.exists():
@@ -422,14 +440,25 @@ async def _handle_health() -> CallToolResult:
     else:
         checks.append(f"[OK]   Token: Valid, {token.days_remaining()} days remaining")
 
-    # 2. Credentials check
+    # 2. Scope check
+    if token.scope:
+        granted = set(token.scope.split())
+        missing = REQUIRED_SCOPES - granted
+        if missing:
+            checks.append(f"[FAIL] Scopes: Missing {', '.join(sorted(missing))}")
+        else:
+            checks.append(f"[OK]   Scopes: All required scopes granted")
+    else:
+        checks.append("[WARN] Scopes: No scope data stored — cannot verify")
+
+    # 3. Credentials check
     try:
         _get_credentials()
         checks.append("[OK]   Credentials: Client ID and secret configured")
     except RuntimeError:
         checks.append("[FAIL] Credentials: LINKEDIN_CLIENT_ID or LINKEDIN_CLIENT_SECRET missing")
 
-    # 3. API connectivity check (only if token not expired)
+    # 4. API connectivity check (only if token not expired)
     if not expired:
         try:
             resp = httpx.get(
@@ -448,10 +477,10 @@ async def _handle_health() -> CallToolResult:
     else:
         checks.append("[SKIP] API: Skipped (token expired)")
 
-    # 4. Encryption check
+    # 5. Encryption check
     checks.append("[OK]   Encryption: Tokens encrypted at rest")
 
-    # 5. Audit log check and daily usage
+    # 6. Audit log check and daily usage
     audit_path = audit._get_log_path()
     if audit_path.exists():
         lines = audit_path.read_text(encoding="utf-8").strip().splitlines()
@@ -478,7 +507,7 @@ async def _handle_health() -> CallToolResult:
     )
 
 
-async def _handle_text_post(args: dict) -> CallToolResult:
+async def _handle_text_post(args: dict[str, Any]) -> CallToolResult:
     token = _require_token()
     text = args["text"]
     visibility = args.get("visibility", "PUBLIC")
@@ -496,7 +525,7 @@ async def _handle_text_post(args: dict) -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 
-async def _handle_article_post(args: dict) -> CallToolResult:
+async def _handle_article_post(args: dict[str, Any]) -> CallToolResult:
     token = _require_token()
     text = args["text"]
     url = args["url"]
@@ -529,7 +558,7 @@ async def _handle_article_post(args: dict) -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 
-async def _handle_image_post(args: dict) -> CallToolResult:
+async def _handle_image_post(args: dict[str, Any]) -> CallToolResult:
     token = _require_token()
     text = args["text"]
     image_path = args["image_path"]
@@ -562,7 +591,7 @@ async def _handle_image_post(args: dict) -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 
-async def _handle_delete_post(args: dict) -> CallToolResult:
+async def _handle_delete_post(args: dict[str, Any]) -> CallToolResult:
     token = _require_token()
     post_urn = args["post_urn"]
 
@@ -592,7 +621,7 @@ def _find_last_published_urn() -> tuple[str, str] | None:
     return None
 
 
-async def _handle_undo_last_post(args: dict) -> CallToolResult:
+async def _handle_undo_last_post(args: dict[str, Any]) -> CallToolResult:
     token = _require_token()
     last = _find_last_published_urn()
     if not last:

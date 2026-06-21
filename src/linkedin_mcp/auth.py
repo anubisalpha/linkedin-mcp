@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import http.server
 import os
+import pathlib
 import secrets
 import threading
 import urllib.parse
@@ -19,9 +20,7 @@ CALLBACK_PORT = 8585
 REDIRECT_URI = f"http://localhost:{CALLBACK_PORT}/callback"
 
 
-def _get_token_path() -> "pathlib.Path":
-    import pathlib
-
+def _get_token_path() -> pathlib.Path:
     custom = os.environ.get("LINKEDIN_MCP_TOKEN_PATH")
     if custom:
         return pathlib.Path(custom)
@@ -101,7 +100,7 @@ def wait_for_callback(expected_state: str, timeout: float = 120) -> str:
         original_do_GET(self)
         received.set()
 
-    _OAuthCallbackHandler.do_GET = patched_do_GET  # type: ignore[assignment]
+    _OAuthCallbackHandler.do_GET = patched_do_GET  # type: ignore[method-assign]
 
     try:
         thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -110,7 +109,7 @@ def wait_for_callback(expected_state: str, timeout: float = 120) -> str:
             raise TimeoutError("OAuth callback not received within timeout")
     finally:
         server.shutdown()
-        _OAuthCallbackHandler.do_GET = original_do_GET  # type: ignore[assignment]
+        _OAuthCallbackHandler.do_GET = original_do_GET  # type: ignore[method-assign]
 
     if _OAuthCallbackHandler.error:
         raise RuntimeError(f"LinkedIn authorization error: {_OAuthCallbackHandler.error}")
@@ -156,7 +155,7 @@ def fetch_sub(access_token: str) -> str:
         headers={"Authorization": f"Bearer {access_token}"},
     )
     resp.raise_for_status()
-    return resp.json()["sub"]
+    return str(resp.json()["sub"])
 
 
 def refresh_access_token(

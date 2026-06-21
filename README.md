@@ -64,11 +64,14 @@ All write operations require explicit user approval before executing, keeping th
 - **Character count** — Post previews show character count against LinkedIn's 3,000-character limit, preventing over-length submissions
 - **Undo/recall** — Quick-delete the most recently published post with a single tool call, without needing to look up the URN
 - **MCP Inspector compatible** — All tool schemas include `additionalProperties: false` and the server declares its version for strict MCP spec compliance
+- **Scope verification** — Checks that the stored token has all required scopes before attempting API actions, failing fast with a clear message
+- **Configurable encryption key** — Optionally provide your own encryption key via environment variable for token portability between machines
+- **Type checked** — Full mypy strict mode with no errors across all modules
 - **Minimal scope** — Only requests the API scopes needed (`openid`, `profile`, `email`, `w_member_social`)
 
 ### Testing
 
-The project includes a comprehensive test suite with **98 unit tests** covering all modules:
+The project includes a comprehensive test suite with **111 unit tests** (75% coverage) covering all modules:
 
 ```bash
 pip install -e ".[dev]"
@@ -77,11 +80,11 @@ pytest tests/ -v
 
 | Test file | Tests | Coverage |
 |---|---|---|
-| `test_models.py` | 19 | Encryption, token save/load, expiry, backward compatibility |
+| `test_models.py` | 24 | Encryption, token save/load, expiry, backward compatibility, configurable key |
 | `test_auth.py` | 12 | OAuth flow, token refresh, auto-refresh logic |
 | `test_api.py` | 15 | Post building, approval stamp, API calls, URL encoding |
 | `test_audit.py` | 5 | NDJSON logging, truncation, directory creation |
-| `test_server.py` | 47 | All tool handlers, preview enforcement, health check, undo, char count, MCP Inspector |
+| `test_server.py` | 55 | All tool handlers, preview enforcement, health check, undo, char count, scope verification, MCP Inspector |
 
 ## Setting up a LinkedIn Developer App
 
@@ -186,6 +189,7 @@ Add to your `claude_desktop_config.json`:
 | `LINKEDIN_MCP_TOKEN_PATH` | No | Custom path for token storage (default: `~/.linkedin-mcp/tokens.json`) |
 | `LINKEDIN_MCP_APPROVAL_STAMP` | No | Text appended to posts showing human approval. Set to empty string to disable. Default: `AI-drafted · Human-approved · Posted via LinkedIn MCP` |
 | `LINKEDIN_MCP_AUDIT_PATH` | No | Custom path for the audit log (default: `~/.linkedin-mcp/audit.log`) |
+| `LINKEDIN_MCP_ENCRYPTION_KEY` | No | Custom encryption key for token storage. Enables token portability between machines. When unset, uses a machine-derived key. |
 
 ## Usage
 

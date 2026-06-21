@@ -66,23 +66,24 @@ def _build_ugc_post(
     text: str,
     visibility: str = "PUBLIC",
     media_category: str = "NONE",
-    media: list[dict] | None = None,
-) -> dict:
-    post = {
+    media: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    share_content: dict[str, object] = {
+        "shareCommentary": {"text": text},
+        "shareMediaCategory": media_category,
+    }
+    if media:
+        share_content["media"] = media
+    post: dict[str, object] = {
         "author": f"urn:li:person:{person_urn}",
         "lifecycleState": "PUBLISHED",
         "specificContent": {
-            "com.linkedin.ugc.ShareContent": {
-                "shareCommentary": {"text": text},
-                "shareMediaCategory": media_category,
-            }
+            "com.linkedin.ugc.ShareContent": share_content,
         },
         "visibility": {
             "com.linkedin.ugc.MemberNetworkVisibility": visibility,
         },
     }
-    if media:
-        post["specificContent"]["com.linkedin.ugc.ShareContent"]["media"] = media
     return post
 
 
@@ -110,7 +111,7 @@ def create_article_post(
     visibility: str = "PUBLIC",
 ) -> PostResult:
     """Share a URL/article with commentary on LinkedIn."""
-    media_item: dict = {"status": "READY", "originalUrl": url}
+    media_item: dict[str, object] = {"status": "READY", "originalUrl": url}
     if title:
         media_item["title"] = {"text": title}
     if description:
@@ -177,7 +178,7 @@ def create_image_post(
     upload_url, asset_urn = _register_image_upload(access_token, person_urn)
     _upload_image_binary(access_token, upload_url, image_path)
 
-    media_item: dict = {"status": "READY", "media": asset_urn}
+    media_item: dict[str, object] = {"status": "READY", "media": asset_urn}
     if title:
         media_item["title"] = {"text": title}
     if description:

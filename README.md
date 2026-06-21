@@ -39,7 +39,8 @@ Restart Claude Code, then ask: *"Log in to my LinkedIn account"*
 |---|---|
 | `linkedin_login` | OAuth 2.0 sign-in — opens your browser for secure authorization |
 | `linkedin_logout` | Clear stored authentication tokens |
-| `linkedin_status` | Check auth status and token expiry |
+| `linkedin_status` | Check auth status, token expiry, and refresh token availability |
+| `linkedin_health` | Run a health check — token validity, API connectivity, encryption, audit log |
 | `linkedin_profile` | Get your name, email, photo, and locale |
 | `linkedin_create_text_post` | Publish a text post (public or connections-only) |
 | `linkedin_create_article_post` | Share a URL/article with commentary |
@@ -179,9 +180,10 @@ Claude will draft the post and show you the exact content before publishing. You
 ## How it works
 
 1. **Authentication**: Standard OAuth 2.0 Authorization Code Flow. Your browser handles the LinkedIn login — credentials never pass through the MCP server.
-2. **Token storage**: Access tokens are saved locally at `~/.linkedin-mcp/tokens.json`. Tokens expire after 60 days.
-3. **Human-in-the-loop**: Every write action (post, delete) requires explicit user approval in your MCP client before the API call is made.
-4. **API scope**: Uses only `openid`, `profile`, `email`, and `w_member_social` — the minimum required for profile reading and content posting.
+2. **Token storage**: Access tokens are encrypted at rest using Fernet encryption with a machine-derived key, stored at `~/.linkedin-mcp/tokens.json`. Tokens expire after 60 days.
+3. **Token refresh**: If LinkedIn provides a refresh token, the server will silently refresh expired access tokens without opening the browser. If no refresh token is available, you'll be prompted to re-authenticate.
+4. **Human-in-the-loop**: Every write action (post, delete) requires explicit user approval in your MCP client before the API call is made.
+5. **API scope**: Uses only `openid`, `profile`, `email`, and `w_member_social` — the minimum required for profile reading and content posting.
 
 ## ToS compliance
 

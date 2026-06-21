@@ -159,6 +159,38 @@ def fetch_sub(access_token: str) -> str:
     return resp.json()["sub"]
 
 
+def refresh_access_token(
+    refresh_token: str, client_id: str, client_secret: str
+) -> TokenData | None:
+    """Exchange a refresh token for a new access token without opening the browser.
+
+    Returns a new TokenData on success, or None if the refresh token is invalid/expired.
+    """
+    try:
+        resp = httpx.post(
+            TOKEN_URL,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": client_id,
+                "client_secret": client_secret,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        resp.raise_for_status()
+    except httpx.HTTPStatusError:
+        return None
+
+    data = resp.json()
+    return TokenData(
+        access_token=data["access_token"],
+        expires_in=data["expires_in"],
+        scope=data.get("scope", ""),
+        refresh_token=data.get("refresh_token", refresh_token),
+        refresh_token_expires_in=data.get("refresh_token_expires_in", 0),
+    )
+
+
 def login(client_id: str, client_secret: str) -> TokenData:
     """Run the full OAuth login flow: browser auth, callback, token exchange.
 
@@ -170,6 +202,29 @@ def login(client_id: str, client_secret: str) -> TokenData:
     token.sub = fetch_sub(token.access_token)
     token.save(_get_token_path())
     return token
+
+
+def auto_refresh(client_id: str, client_secret: str) -> TokenData | None:
+    """Try to silently refresh an expired token.
+
+    If the stored token has a refresh token, exchanges it for a new access
+    token without opening the browser. Returns the refreshed TokenData on
+    success, or None if refresh isn't possible.
+    """
+    token = load_token()
+    if not token or not token.is_expired():
+        return token
+
+    if not token.refresh_token:
+        return None
+
+    new_token = refresh_access_token(token.refresh_token, client_id, client_secret)
+    if not new_token:
+        return None
+
+    new_token.sub = token.sub or fetch_sub(new_token.access_token)
+    new_token.save(_get_token_path())
+    return new_token
 
 
 def load_token() -> TokenData | None:

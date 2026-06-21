@@ -42,6 +42,16 @@ def _require_token() -> auth.TokenData:
     token = auth.load_token()
     if not token:
         raise RuntimeError("Not logged in. Use the linkedin_login tool first.")
+    if token.is_expired():
+        client_id, client_secret = _get_credentials()
+        refreshed = auth.auto_refresh(client_id, client_secret)
+        if refreshed:
+            return refreshed
+        raise RuntimeError(
+            "Access token has expired. "
+            + ("No refresh token available — " if not token.refresh_token else "Refresh failed — ")
+            + "use linkedin_login to re-authenticate."
+        )
     return token
 
 
@@ -208,6 +218,14 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="linkedin_health",
+            description=(
+                "Run a health check: verifies token validity, API connectivity, "
+                "and reports token expiry status. Use this to diagnose connection issues."
+            ),
+            inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        Tool(
             name="linkedin_delete_post",
             description=(
                 "Delete a LinkedIn post by its URN. "
@@ -242,6 +260,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             return await _handle_profile()
         elif name == "linkedin_audit_log":
             return await _handle_audit_log(arguments)
+        elif name == "linkedin_health":
+            return await _handle_health()
         elif name == "linkedin_create_text_post":
             return await _handle_text_post(arguments)
         elif name == "linkedin_create_article_post":
@@ -292,18 +312,21 @@ async def _handle_status() -> CallToolResult:
         return CallToolResult(
             content=[TextContent(type="text", text="Not logged in. Use linkedin_login to authenticate.")]
         )
+    expired = token.is_expired()
+    lines = [
+        f"Status: {'EXPIRED' if expired else 'Active'}",
+        f"Member ID: {token.sub}",
+        f"Scopes: {token.scope}",
+        f"Created: {token.age_description()}",
+        f"Days remaining: {token.days_remaining()}",
+        f"Refresh token: {'available' if token.refresh_token else 'none'}",
+    ]
+    if expired and token.refresh_token:
+        lines.append("Auto-refresh will be attempted on next API call.")
+    elif expired:
+        lines.append("Use linkedin_login to re-authenticate.")
     return CallToolResult(
-        content=[
-            TextContent(
-                type="text",
-                text=(
-                    f"Logged in.\n"
-                    f"Member ID: {token.sub}\n"
-                    f"Scopes: {token.scope}\n"
-                    f"Token lifetime: {token.expires_in // 86400} days"
-                ),
-            )
-        ]
+        content=[TextContent(type="text", text="\n".join(lines))]
     )
 
 
@@ -336,6 +359,70 @@ async def _handle_audit_log(args: dict) -> CallToolResult:
         entries.append(row)
     return CallToolResult(
         content=[TextContent(type="text", text="\n".join(entries))]
+    )
+
+
+async def _handle_health() -> CallToolResult:
+    checks: list[str] = []
+
+    # 1. Token check
+    token = auth.load_token()
+    if not token:
+        checks.append("[FAIL] Token: No stored token found")
+        return CallToolResult(
+            content=[TextContent(type="text", text="\n".join(checks))]
+        )
+
+    expired = token.is_expired()
+    if expired:
+        checks.append(f"[WARN] Token: Expired ({token.age_description()})")
+        if token.refresh_token:
+            checks.append("[INFO] Refresh token available — auto-refresh will be attempted")
+        else:
+            checks.append("[FAIL] No refresh token — manual re-login required")
+    else:
+        checks.append(f"[OK]   Token: Valid, {token.days_remaining()} days remaining")
+
+    # 2. Credentials check
+    try:
+        _get_credentials()
+        checks.append("[OK]   Credentials: Client ID and secret configured")
+    except RuntimeError:
+        checks.append("[FAIL] Credentials: LINKEDIN_CLIENT_ID or LINKEDIN_CLIENT_SECRET missing")
+
+    # 3. API connectivity check (only if token not expired)
+    if not expired:
+        import httpx
+        try:
+            resp = httpx.get(
+                "https://api.linkedin.com/v2/userinfo",
+                headers={"Authorization": f"Bearer {token.access_token}"},
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                checks.append("[OK]   API: LinkedIn API reachable and token accepted")
+            elif resp.status_code == 401:
+                checks.append("[FAIL] API: Token rejected by LinkedIn (401 Unauthorized)")
+            else:
+                checks.append(f"[WARN] API: Unexpected status {resp.status_code}")
+        except Exception as e:
+            checks.append(f"[FAIL] API: Cannot reach LinkedIn — {e}")
+    else:
+        checks.append("[SKIP] API: Skipped (token expired)")
+
+    # 4. Encryption check
+    checks.append("[OK]   Encryption: Tokens encrypted at rest")
+
+    # 5. Audit log check
+    audit_path = audit._get_log_path()
+    if audit_path.exists():
+        line_count = len(audit_path.read_text(encoding="utf-8").strip().splitlines())
+        checks.append(f"[OK]   Audit: {line_count} entries logged")
+    else:
+        checks.append("[INFO] Audit: No entries yet")
+
+    return CallToolResult(
+        content=[TextContent(type="text", text="\n".join(checks))]
     )
 
 

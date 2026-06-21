@@ -1,0 +1,18 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+<rect width="512" height="512" rx="80" fill="#0A66C2"/>
+<rect x="80" y="200" width="72" height="200" rx="6" fill="white"/>
+<rect x="80" y="120" width="72" height="62" rx="36" fill="white"/>
+<path d="M192 400V268c0-40 16-64 52-64 32 0 44 24 44 60v136h72V252c0-68-36-108-92-108-40 0-60 20-72 36V200h-72c1 16 0 200 0 200h68z" fill="white"/>
+<circle cx="390" cy="160" r="28" fill="none" stroke="white" stroke-width="5"/>
+<circle cx="390" cy="160" r="8" fill="white"/>
+<line x1="390" y1="188" x2="390" y2="240" stroke="white" stroke-width="5"/>
+<line x1="390" y1="240" x2="350" y2="270" stroke="white" stroke-width="5" stroke-linecap="round"/>
+<line x1="390" y1="240" x2="430" y2="270" stroke="white" stroke-width="5" stroke-linecap="round"/>
+<circle cx="350" cy="278" r="10" fill="white" opacity="0.7"/>
+<circle cx="430" cy="278" r="10" fill="white" opacity="0.7"/>
+<line x1="350" y1="288" x2="350" y2="330" stroke="white" stroke-width="4" stroke-linecap="round" opacity="0.7"/>
+<line x1="430" y1="288" x2="430" y2="330" stroke="white" stroke-width="4" stroke-linecap="round" opacity="0.7"/>
+<circle cx="350" cy="338" r="8" fill="white" opacity="0.5"/>
+<circle cx="430" cy="338" r="8" fill="white" opacity="0.5"/>
+<text x="256" y="470" text-anchor="middle" font-family="sans-serif" font-weight="500" font-size="36" fill="white" opacity="0.9">MCP</text>
+</svg>

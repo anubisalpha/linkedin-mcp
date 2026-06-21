@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import httpx
 
 from .models import PostResult, Profile
+
+DEFAULT_APPROVAL_STAMP = "\n\n—\nAI-drafted · Human-approved · Posted via LinkedIn MCP"
 
 API_BASE = "https://api.linkedin.com/v2"
 USERINFO_URL = f"{API_BASE}/userinfo"
@@ -36,6 +39,26 @@ def get_profile(access_token: str) -> Profile:
         email=data.get("email", ""),
         email_verified=data.get("email_verified", False),
     )
+
+
+def _get_approval_stamp() -> str:
+    """Return the approval stamp to append to posts.
+
+    Configurable via LINKEDIN_MCP_APPROVAL_STAMP env var.
+    Set to empty string to disable.
+    """
+    stamp = os.environ.get("LINKEDIN_MCP_APPROVAL_STAMP")
+    if stamp is not None:
+        return stamp if stamp else ""
+    return DEFAULT_APPROVAL_STAMP
+
+
+def _stamp_text(text: str) -> str:
+    """Append the approval stamp to post text."""
+    stamp = _get_approval_stamp()
+    if stamp:
+        return text + stamp
+    return text
 
 
 def _build_ugc_post(
@@ -70,7 +93,7 @@ def create_text_post(
     visibility: str = "PUBLIC",
 ) -> PostResult:
     """Create a text-only post on LinkedIn."""
-    body = _build_ugc_post(person_urn, text, visibility)
+    body = _build_ugc_post(person_urn, _stamp_text(text), visibility)
     resp = httpx.post(UGC_POSTS_URL, json=body, headers=_headers(access_token))
     resp.raise_for_status()
     urn = resp.headers.get("X-RestLi-Id", "")
@@ -94,7 +117,7 @@ def create_article_post(
         media_item["description"] = {"text": description}
 
     body = _build_ugc_post(
-        person_urn, text, visibility, media_category="ARTICLE", media=[media_item]
+        person_urn, _stamp_text(text), visibility, media_category="ARTICLE", media=[media_item]
     )
     resp = httpx.post(UGC_POSTS_URL, json=body, headers=_headers(access_token))
     resp.raise_for_status()
@@ -161,7 +184,7 @@ def create_image_post(
         media_item["description"] = {"text": description}
 
     body = _build_ugc_post(
-        person_urn, text, visibility, media_category="IMAGE", media=[media_item]
+        person_urn, _stamp_text(text), visibility, media_category="IMAGE", media=[media_item]
     )
     resp = httpx.post(UGC_POSTS_URL, json=body, headers=_headers(access_token))
     resp.raise_for_status()

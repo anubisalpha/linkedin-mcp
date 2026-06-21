@@ -10,6 +10,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, TextContent, Tool
 
 from . import api, audit, auth
+from .api import _get_approval_stamp
 
 server = Server("linkedin-mcp")
 
@@ -344,7 +345,8 @@ async def _handle_text_post(args: dict) -> CallToolResult:
     visibility = args.get("visibility", "PUBLIC")
 
     if not args.get("confirm", False):
-        preview = f"Text post ({visibility}):\n\n{text}"
+        stamp = _get_approval_stamp()
+        preview = f"Text post ({visibility}):\n\n{text}{stamp}"
         audit.log("preview", "linkedin_create_text_post", text)
         return _preview_result(preview)
 
@@ -363,7 +365,8 @@ async def _handle_article_post(args: dict) -> CallToolResult:
     visibility = args.get("visibility", "PUBLIC")
 
     if not args.get("confirm", False):
-        preview = f"Article post ({visibility}):\n\n{text}\n\nURL: {url}"
+        stamp = _get_approval_stamp()
+        preview = f"Article post ({visibility}):\n\n{text}{stamp}\n\nURL: {url}"
         if title:
             preview += f"\nTitle: {title}"
         if description:
@@ -394,7 +397,8 @@ async def _handle_image_post(args: dict) -> CallToolResult:
     visibility = args.get("visibility", "PUBLIC")
 
     if not args.get("confirm", False):
-        preview = f"Image post ({visibility}):\n\n{text}\n\nImage: {image_path}"
+        stamp = _get_approval_stamp()
+        preview = f"Image post ({visibility}):\n\n{text}{stamp}\n\nImage: {image_path}"
         if title:
             preview += f"\nTitle: {title}"
         if description:

@@ -149,6 +149,8 @@ Add to your `claude_desktop_config.json`:
 | `LINKEDIN_CLIENT_ID` | Yes | Your LinkedIn app's Client ID |
 | `LINKEDIN_CLIENT_SECRET` | Yes | Your LinkedIn app's Client Secret |
 | `LINKEDIN_MCP_TOKEN_PATH` | No | Custom path for token storage (default: `~/.linkedin-mcp/tokens.json`) |
+| `LINKEDIN_MCP_APPROVAL_STAMP` | No | Text appended to posts showing human approval. Set to empty string to disable. Default: `AI-drafted · Human-approved · Posted via LinkedIn MCP` |
+| `LINKEDIN_MCP_AUDIT_PATH` | No | Custom path for the audit log (default: `~/.linkedin-mcp/audit.log`) |
 
 ## Usage
 

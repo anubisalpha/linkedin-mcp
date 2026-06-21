@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """LinkedIn MCP Server — ToS-compliant LinkedIn integration via the official API."""
 
+import json
 import os
 from typing import Any
 
@@ -8,7 +9,7 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import CallToolResult, TextContent, Tool
 
-from . import api, auth
+from . import api, audit, auth
 
 server = Server("linkedin-mcp")
 
@@ -86,6 +87,21 @@ async def list_tools() -> list[Tool]:
             name="linkedin_profile",
             description="Get the authenticated LinkedIn member's profile (name, email, photo, locale).",
             inputSchema={"type": "object", "properties": {}, "required": []},
+        ),
+        Tool(
+            name="linkedin_audit_log",
+            description="View the audit log of all post previews, publishes, and deletions. Shows the approval trail.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Number of recent entries to show. Defaults to 20.",
+                        "default": 20,
+                    },
+                },
+                "required": [],
+            },
         ),
         Tool(
             name="linkedin_create_text_post",
@@ -223,6 +239,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             return await _handle_status()
         elif name == "linkedin_profile":
             return await _handle_profile()
+        elif name == "linkedin_audit_log":
+            return await _handle_audit_log(arguments)
         elif name == "linkedin_create_text_post":
             return await _handle_text_post(arguments)
         elif name == "linkedin_create_article_post":
@@ -294,6 +312,32 @@ async def _handle_profile() -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=profile.summary())])
 
 
+async def _handle_audit_log(args: dict) -> CallToolResult:
+    limit = args.get("limit", 20)
+    path = audit._get_log_path()
+    if not path.exists():
+        return CallToolResult(
+            content=[TextContent(type="text", text="No audit log entries yet.")]
+        )
+    lines = path.read_text(encoding="utf-8").strip().splitlines()
+    recent = lines[-limit:]
+    entries = []
+    for line in recent:
+        entry = json.loads(line)
+        ts = entry["timestamp"][:19].replace("T", " ")
+        action = entry["action"].upper()
+        tool = entry["tool"].replace("linkedin_", "")
+        summary = entry["content_summary"][:80]
+        result = entry.get("result", "")
+        row = f"[{ts}] {action:10s} {tool:25s} {summary}"
+        if result:
+            row += f" -> {result}"
+        entries.append(row)
+    return CallToolResult(
+        content=[TextContent(type="text", text="\n".join(entries))]
+    )
+
+
 async def _handle_text_post(args: dict) -> CallToolResult:
     token = _require_token()
     text = args["text"]
@@ -301,9 +345,12 @@ async def _handle_text_post(args: dict) -> CallToolResult:
 
     if not args.get("confirm", False):
         preview = f"Text post ({visibility}):\n\n{text}"
+        audit.log("preview", "linkedin_create_text_post", text)
         return _preview_result(preview)
 
+    audit.log("publish", "linkedin_create_text_post", text)
     result = api.create_text_post(token.access_token, token.sub, text, visibility)
+    audit.log("published", "linkedin_create_text_post", text, result.urn)
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 
@@ -321,8 +368,10 @@ async def _handle_article_post(args: dict) -> CallToolResult:
             preview += f"\nTitle: {title}"
         if description:
             preview += f"\nDescription: {description}"
+        audit.log("preview", "linkedin_create_article_post", f"{text} | {url}")
         return _preview_result(preview)
 
+    audit.log("publish", "linkedin_create_article_post", f"{text} | {url}")
     result = api.create_article_post(
         access_token=token.access_token,
         person_urn=token.sub,
@@ -332,6 +381,7 @@ async def _handle_article_post(args: dict) -> CallToolResult:
         description=description,
         visibility=visibility,
     )
+    audit.log("published", "linkedin_create_article_post", f"{text} | {url}", result.urn)
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 
@@ -349,8 +399,10 @@ async def _handle_image_post(args: dict) -> CallToolResult:
             preview += f"\nTitle: {title}"
         if description:
             preview += f"\nDescription: {description}"
+        audit.log("preview", "linkedin_create_image_post", f"{text} | {image_path}")
         return _preview_result(preview)
 
+    audit.log("publish", "linkedin_create_image_post", f"{text} | {image_path}")
     result = api.create_image_post(
         access_token=token.access_token,
         person_urn=token.sub,
@@ -360,6 +412,7 @@ async def _handle_image_post(args: dict) -> CallToolResult:
         description=description,
         visibility=visibility,
     )
+    audit.log("published", "linkedin_create_image_post", f"{text} | {image_path}", result.urn)
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 
@@ -369,9 +422,12 @@ async def _handle_delete_post(args: dict) -> CallToolResult:
 
     if not args.get("confirm", False):
         preview = f"DELETE post: {post_urn}\n\nThis action cannot be undone."
+        audit.log("preview", "linkedin_delete_post", post_urn)
         return _preview_result(preview)
 
+    audit.log("delete", "linkedin_delete_post", post_urn)
     result = api.delete_post(token.access_token, post_urn)
+    audit.log("deleted", "linkedin_delete_post", post_urn)
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 

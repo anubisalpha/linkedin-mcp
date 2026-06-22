@@ -294,3 +294,104 @@ class TestHeaders:
         h = api._headers("my_token")
         assert h["Authorization"] == "Bearer my_token"
         assert h["X-Restli-Protocol-Version"] == "2.0.0"
+
+    def test_rest_headers_include_version(self):
+        h = api._rest_headers("my_token")
+        assert h["Authorization"] == "Bearer my_token"
+        assert h["LinkedIn-Version"] == api.LINKEDIN_VERSION
+        assert h["X-Restli-Protocol-Version"] == "2.0.0"
+
+
+class TestPollPost:
+    @patch("linkedin_mcp.api.httpx.post")
+    def test_create_poll_post(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=201,
+            headers={"X-RestLi-Id": "urn:li:share:poll1"},
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        result = api.create_poll_post(
+            "token", "person1", "What do you think?",
+            "Best language?", ["Python", "Rust"], "3_DAYS",
+        )
+        assert result.urn == "urn:li:share:poll1"
+        assert result.status == "created"
+        body = mock_post.call_args[1]["json"]
+        assert body["content"]["poll"]["question"] == "Best language?"
+        assert len(body["content"]["poll"]["options"]) == 2
+        assert body["content"]["poll"]["settings"]["duration"] == "THREE_DAYS"
+
+    @patch("linkedin_mcp.api.httpx.post")
+    def test_poll_duration_mapping(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=201, headers={"X-RestLi-Id": "urn:li:share:poll2"},
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        for input_dur, expected in [
+            ("1_DAY", "ONE_DAY"), ("7_DAYS", "SEVEN_DAYS"),
+            ("14_DAYS", "FOURTEEN_DAYS"), ("unknown", "THREE_DAYS"),
+        ]:
+            api.create_poll_post("t", "p", "x", "q?", ["a", "b"], input_dur)
+            body = mock_post.call_args[1]["json"]
+            assert body["content"]["poll"]["settings"]["duration"] == expected
+
+
+class TestDocumentPost:
+    @patch("linkedin_mcp.api.httpx.post")
+    def test_register_document_upload(self, mock_post):
+        mock_post.return_value = MagicMock(status_code=200)
+        mock_post.return_value.raise_for_status = MagicMock()
+        mock_post.return_value.json.return_value = {
+            "value": {
+                "uploadUrl": "https://upload.example.com/doc",
+                "document": "urn:li:document:abc123",
+            }
+        }
+        upload_url, doc_urn = api._register_document_upload("token", "person1")
+        assert upload_url == "https://upload.example.com/doc"
+        assert doc_urn == "urn:li:document:abc123"
+
+    @patch("linkedin_mcp.api.httpx.put")
+    def test_upload_document_binary(self, mock_put, tmp_path):
+        mock_put.return_value = MagicMock(status_code=200)
+        mock_put.return_value.raise_for_status = MagicMock()
+
+        doc = tmp_path / "test.pdf"
+        doc.write_bytes(b"%PDF-1.4 content")
+        api._upload_document_binary("token", "https://upload.example.com", str(doc))
+        mock_put.assert_called_once()
+        assert mock_put.call_args[1]["content"] == b"%PDF-1.4 content"
+
+    @patch("linkedin_mcp.api.httpx.post")
+    @patch("linkedin_mcp.api._upload_document_binary")
+    @patch("linkedin_mcp.api._register_document_upload")
+    def test_create_document_post(self, mock_register, mock_upload, mock_post):
+        mock_register.return_value = ("https://upload.example.com", "urn:li:document:abc")
+        mock_post.return_value = MagicMock(
+            status_code=201,
+            headers={"X-RestLi-Id": "urn:li:share:doc1"},
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        result = api.create_document_post("token", "p1", "My report", "/report.pdf", title="Q2 Report")
+        assert result.urn == "urn:li:share:doc1"
+        body = mock_post.call_args[1]["json"]
+        assert body["content"]["article"]["media"] == "urn:li:document:abc"
+        assert body["content"]["article"]["title"] == "Q2 Report"
+
+    @patch("linkedin_mcp.api.httpx.post")
+    @patch("linkedin_mcp.api._upload_document_binary")
+    @patch("linkedin_mcp.api._register_document_upload")
+    def test_create_document_post_no_title(self, mock_register, mock_upload, mock_post):
+        mock_register.return_value = ("https://upload.example.com", "urn:li:document:abc")
+        mock_post.return_value = MagicMock(
+            status_code=201,
+            headers={"X-RestLi-Id": "urn:li:share:doc2"},
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        result = api.create_document_post("token", "p1", "Report", "/report.pdf")
+        body = mock_post.call_args[1]["json"]
+        assert "title" not in body["content"]["article"]

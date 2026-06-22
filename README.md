@@ -50,6 +50,8 @@ The setup assistant will check your credentials, show any missing steps, and gui
 | `linkedin_create_text_post` | Publish a text post (public or connections-only) |
 | `linkedin_create_article_post` | Share a URL/article with commentary |
 | `linkedin_create_image_post` | Upload an image and publish with text |
+| `linkedin_create_poll` | Create a poll with 2-4 options and configurable duration |
+| `linkedin_create_document_post` | Upload a document (PDF, PPTX, DOCX, etc.) and publish with text |
 | `linkedin_delete_post` | Delete a post by its URN |
 | `linkedin_undo_last_post` | Quick-delete the most recently published post (undo) |
 | `linkedin_post_history` | View your post history — URNs, timestamps, content, with optional type filter |
@@ -77,11 +79,13 @@ All write operations require explicit user approval before executing, keeping th
 - **Post history** — Local record of all published posts with URNs, timestamps, content, and type filtering
 - **Link preview** — Fetch Open Graph metadata from URLs before sharing to check the link card
 - **First-run setup** — Interactive setup assistant that checks configuration and walks through missing steps
+- **Poll creation** — Create LinkedIn polls with 2-4 options and configurable duration (1, 3, 7, or 14 days)
+- **Document posts** — Upload and share PDFs, slide decks, and other documents as native LinkedIn document posts
 - **Minimal scope** — Only requests the API scopes needed (`openid`, `profile`, `email`, `w_member_social`)
 
 ### Testing
 
-The project includes a comprehensive test suite with **197 unit tests** (99% coverage) covering all modules:
+The project includes a comprehensive test suite with **217 unit tests** (99% coverage) covering all modules:
 
 ```bash
 pip install -e ".[dev]"
@@ -92,10 +96,10 @@ pytest tests/ -v
 |---|---|---|
 | `test_models.py` | 24 | Encryption, token save/load, expiry, backward compatibility, configurable key |
 | `test_auth.py` | 29 | OAuth flow, token refresh, auto-refresh logic, configurable port, callback handler, real HTTP callback tests |
-| `test_api.py` | 26 | Post building, approval stamp, API calls, URL encoding, image upload, link preview |
+| `test_api.py` | 35 | Post building, approval stamp, API calls, URL encoding, image upload, link preview, polls, documents |
 | `test_audit.py` | 7 | NDJSON logging, truncation, directory creation, configurable path |
 | `test_history.py` | 14 | Post recording, retrieval, filtering, deletion, corruption handling |
-| `test_server.py` | 97 | All tool handlers, call routing, preview enforcement, health check branches, undo, char count, scope verification, setup branches, MCP Inspector |
+| `test_server.py` | 108 | All tool handlers, call routing, preview enforcement, health check, undo, polls, documents, setup, MCP Inspector |
 
 ## Setting up a LinkedIn Developer App
 

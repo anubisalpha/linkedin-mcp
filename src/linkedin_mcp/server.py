@@ -18,7 +18,7 @@ LINKEDIN_POST_CHAR_LIMIT = 3000
 
 server = Server(
     "linkedin-mcp",
-    version="0.3.0",
+    version="0.4.0",
 )
 
 CONFIRM_DESCRIPTION = (
@@ -315,7 +315,7 @@ async def list_tools() -> list[Tool]:
                     },
                     "type": {
                         "type": "string",
-                        "enum": ["text", "article", "image"],
+                        "enum": ["text", "article", "image", "poll", "document"],
                         "description": "Filter by post type. Omit to show all types.",
                         "default": "",
                     },
@@ -340,6 +340,84 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["url"],
+                "additionalProperties": False,
+            },
+        ),
+        Tool(
+            name="linkedin_create_poll",
+            description=(
+                "Create a poll on LinkedIn with a question and 2-4 options. "
+                "Must be called twice: first without confirm to preview, "
+                "then with confirm=true after the user approves the content."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Commentary text to accompany the poll.",
+                    },
+                    "question": {
+                        "type": "string",
+                        "description": "The poll question (max 140 characters).",
+                    },
+                    "options": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 2,
+                        "maxItems": 4,
+                        "description": "2-4 poll options (each max 30 characters).",
+                    },
+                    "duration": {
+                        "type": "string",
+                        "enum": ["1_DAY", "3_DAYS", "7_DAYS", "14_DAYS"],
+                        "description": "How long the poll runs. Defaults to 3_DAYS.",
+                        "default": "3_DAYS",
+                    },
+                    "visibility": {
+                        "type": "string",
+                        "enum": ["PUBLIC", "CONNECTIONS"],
+                        "description": "Who can see the post. Defaults to PUBLIC.",
+                        "default": "PUBLIC",
+                    },
+                    "confirm": CONFIRM_SCHEMA,
+                },
+                "required": ["text", "question", "options"],
+                "additionalProperties": False,
+            },
+        ),
+        Tool(
+            name="linkedin_create_document_post",
+            description=(
+                "Upload a document (PDF, slide deck, etc.) and publish a post with it on LinkedIn. "
+                "Must be called twice: first without confirm to preview, "
+                "then with confirm=true after the user approves the content."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The post content text.",
+                    },
+                    "file_path": {
+                        "type": "string",
+                        "description": "Absolute path to the document file to upload (PDF, PPTX, DOCX, etc.).",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Title displayed on the document card in the feed.",
+                        "default": "",
+                    },
+                    "visibility": {
+                        "type": "string",
+                        "enum": ["PUBLIC", "CONNECTIONS"],
+                        "description": "Who can see the post. Defaults to PUBLIC.",
+                        "default": "PUBLIC",
+                    },
+                    "confirm": CONFIRM_SCHEMA,
+                },
+                "required": ["text", "file_path"],
                 "additionalProperties": False,
             },
         ),
@@ -385,6 +463,10 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             return await _handle_delete_post(arguments)
         elif name == "linkedin_undo_last_post":
             return await _handle_undo_last_post(arguments)
+        elif name == "linkedin_create_poll":
+            return await _handle_poll_post(arguments)
+        elif name == "linkedin_create_document_post":
+            return await _handle_document_post(arguments)
         elif name == "linkedin_post_history":
             return await _handle_post_history(arguments)
         elif name == "linkedin_link_preview":
@@ -655,6 +737,128 @@ async def _handle_image_post(args: dict[str, Any]) -> CallToolResult:
     )
     audit.log("published", "linkedin_create_image_post", f"{text} | {image_path}", result.urn)
     history.record_post(result.urn, "image", text, visibility, image_path=image_path)
+    return CallToolResult(content=[TextContent(type="text", text=result.message)])
+
+
+async def _handle_poll_post(args: dict[str, Any]) -> CallToolResult:
+    token = _require_token()
+    text = args["text"]
+    question = args["question"]
+    options: list[str] = args["options"]
+    duration = args.get("duration", "3_DAYS")
+    visibility = args.get("visibility", "PUBLIC")
+
+    if len(options) < 2 or len(options) > 4:
+        return CallToolResult(
+            content=[TextContent(type="text", text="Polls require 2-4 options.")],
+            isError=True,
+        )
+    if len(question) > 140:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Poll question is {len(question)} characters — max is 140.",
+            )],
+            isError=True,
+        )
+    long_options = [f"'{o}' ({len(o)} chars)" for o in options if len(o) > 30]
+    if long_options:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Poll options over 30-char limit: {', '.join(long_options)}",
+            )],
+            isError=True,
+        )
+
+    if not args.get("confirm", False):
+        stamp = _get_approval_stamp()
+        stamped = text + stamp
+        opts_display = "\n".join(f"  {i+1}. {o}" for i, o in enumerate(options))
+        preview = (
+            f"Poll post ({visibility}):\n\n{stamped}\n\n"
+            f"Question: {question}\n"
+            f"Options:\n{opts_display}\n"
+            f"Duration: {duration.replace('_', ' ')}"
+        )
+        audit.log("preview", "linkedin_create_poll", f"{question} | {text}")
+        return _preview_result(preview, stamped)
+
+    audit.log("publish", "linkedin_create_poll", f"{question} | {text}")
+    result = api.create_poll_post(
+        access_token=token.access_token,
+        person_urn=token.sub,
+        text=text,
+        question=question,
+        options=options,
+        duration=duration,
+        visibility=visibility,
+    )
+    audit.log("published", "linkedin_create_poll", f"{question} | {text}", result.urn)
+    history.record_post(result.urn, "poll", f"{question}: {text}", visibility)
+    return CallToolResult(content=[TextContent(type="text", text=result.message)])
+
+
+SUPPORTED_DOCUMENT_EXTENSIONS = {".pdf", ".pptx", ".ppt", ".docx", ".doc", ".xlsx", ".xls"}
+
+
+async def _handle_document_post(args: dict[str, Any]) -> CallToolResult:
+    token = _require_token()
+    text = args["text"]
+    file_path = args["file_path"]
+    title = args.get("title", "")
+    visibility = args.get("visibility", "PUBLIC")
+
+    from pathlib import Path as _Path
+    doc_path = _Path(file_path)
+    if not doc_path.exists():
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"File not found: {file_path}")],
+            isError=True,
+        )
+    ext = doc_path.suffix.lower()
+    if ext not in SUPPORTED_DOCUMENT_EXTENSIONS:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Unsupported file type '{ext}'. Supported: {', '.join(sorted(SUPPORTED_DOCUMENT_EXTENSIONS))}",
+            )],
+            isError=True,
+        )
+
+    file_size_mb = doc_path.stat().st_size / (1024 * 1024)
+    if file_size_mb > 100:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"File is {file_size_mb:.1f} MB — LinkedIn's limit is 100 MB.",
+            )],
+            isError=True,
+        )
+
+    if not args.get("confirm", False):
+        stamp = _get_approval_stamp()
+        stamped = text + stamp
+        preview = (
+            f"Document post ({visibility}):\n\n{stamped}\n\n"
+            f"File: {doc_path.name} ({file_size_mb:.1f} MB)"
+        )
+        if title:
+            preview += f"\nTitle: {title}"
+        audit.log("preview", "linkedin_create_document_post", f"{text} | {file_path}")
+        return _preview_result(preview, stamped)
+
+    audit.log("publish", "linkedin_create_document_post", f"{text} | {file_path}")
+    result = api.create_document_post(
+        access_token=token.access_token,
+        person_urn=token.sub,
+        text=text,
+        file_path=file_path,
+        title=title,
+        visibility=visibility,
+    )
+    audit.log("published", "linkedin_create_document_post", f"{text} | {file_path}", result.urn)
+    history.record_post(result.urn, "document", text, visibility)
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 

@@ -35,16 +35,28 @@ class LinkPreview:
 DEFAULT_APPROVAL_STAMP = "\n\n—\nAI-drafted · Human-approved · Posted via LinkedIn MCP"
 
 API_BASE = "https://api.linkedin.com/v2"
+REST_BASE = "https://api.linkedin.com/rest"
 USERINFO_URL = f"{API_BASE}/userinfo"
 UGC_POSTS_URL = f"{API_BASE}/ugcPosts"
 ASSETS_URL = f"{API_BASE}/assets"
+POSTS_URL = f"{REST_BASE}/posts"
+DOCUMENTS_URL = f"{REST_BASE}/documents"
 
 RESTLI_HEADER = {"X-Restli-Protocol-Version": "2.0.0"}
+LINKEDIN_VERSION = "202405"
 
 
 def _headers(access_token: str) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {access_token}",
+        **RESTLI_HEADER,
+    }
+
+
+def _rest_headers(access_token: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {access_token}",
+        "LinkedIn-Version": LINKEDIN_VERSION,
         **RESTLI_HEADER,
     }
 
@@ -227,6 +239,129 @@ def delete_post(access_token: str, post_urn: str) -> PostResult:
     )
     resp.raise_for_status()
     return PostResult(urn=post_urn, status="deleted", message=f"Post deleted: {post_urn}")
+
+
+POLL_DURATION_MAP = {
+    "1_DAY": "ONE_DAY",
+    "3_DAYS": "THREE_DAYS",
+    "7_DAYS": "SEVEN_DAYS",
+    "14_DAYS": "FOURTEEN_DAYS",
+}
+
+
+def create_poll_post(
+    access_token: str,
+    person_urn: str,
+    text: str,
+    question: str,
+    options: list[str],
+    duration: str = "3_DAYS",
+    visibility: str = "PUBLIC",
+) -> PostResult:
+    """Create a poll post on LinkedIn using the Posts API."""
+    api_duration = POLL_DURATION_MAP.get(duration, "THREE_DAYS")
+    poll_options = [{"text": opt} for opt in options]
+
+    vis_value = "PUBLIC" if visibility == "PUBLIC" else "CONNECTIONS"
+    body: dict[str, object] = {
+        "author": f"urn:li:person:{person_urn}",
+        "commentary": _stamp_text(text),
+        "visibility": vis_value,
+        "distribution": {
+            "feedDistribution": "MAIN_FEED",
+            "targetEntities": [],
+            "thirdPartyDistributionChannels": [],
+        },
+        "lifecycleState": "PUBLISHED",
+        "content": {
+            "poll": {
+                "question": question,
+                "options": poll_options,
+                "settings": {"duration": api_duration},
+            }
+        },
+    }
+    resp = httpx.post(
+        POSTS_URL,
+        json=body,
+        headers=_rest_headers(access_token),
+    )
+    resp.raise_for_status()
+    urn = resp.headers.get("X-RestLi-Id", "")
+    return PostResult(urn=urn, status="created", message=f"Poll published: {urn}")
+
+
+def _register_document_upload(access_token: str, person_urn: str) -> tuple[str, str]:
+    """Register a document for upload. Returns (upload_url, document_urn)."""
+    body = {
+        "initializeUploadRequest": {
+            "owner": f"urn:li:person:{person_urn}",
+        }
+    }
+    resp = httpx.post(
+        f"{DOCUMENTS_URL}?action=initializeUpload",
+        json=body,
+        headers=_rest_headers(access_token),
+    )
+    resp.raise_for_status()
+    data = resp.json()["value"]
+    upload_url: str = data["uploadUrl"]
+    document_urn: str = data["document"]
+    return upload_url, document_urn
+
+
+def _upload_document_binary(access_token: str, upload_url: str, file_path: str) -> None:
+    """Upload the document binary to LinkedIn's upload URL."""
+    file_data = Path(file_path).read_bytes()
+    resp = httpx.put(
+        upload_url,
+        content=file_data,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/octet-stream",
+        },
+        timeout=120,
+    )
+    resp.raise_for_status()
+
+
+def create_document_post(
+    access_token: str,
+    person_urn: str,
+    text: str,
+    file_path: str,
+    title: str = "",
+    visibility: str = "PUBLIC",
+) -> PostResult:
+    """Upload a document (PDF, etc.) and create a post with it on LinkedIn."""
+    upload_url, document_urn = _register_document_upload(access_token, person_urn)
+    _upload_document_binary(access_token, upload_url, file_path)
+
+    vis_value = "PUBLIC" if visibility == "PUBLIC" else "CONNECTIONS"
+    doc_content: dict[str, object] = {"media": document_urn}
+    if title:
+        doc_content["title"] = title
+
+    body: dict[str, object] = {
+        "author": f"urn:li:person:{person_urn}",
+        "commentary": _stamp_text(text),
+        "visibility": vis_value,
+        "distribution": {
+            "feedDistribution": "MAIN_FEED",
+            "targetEntities": [],
+            "thirdPartyDistributionChannels": [],
+        },
+        "lifecycleState": "PUBLISHED",
+        "content": {"article": doc_content},
+    }
+    resp = httpx.post(
+        POSTS_URL,
+        json=body,
+        headers=_rest_headers(access_token),
+    )
+    resp.raise_for_status()
+    urn = resp.headers.get("X-RestLi-Id", "")
+    return PostResult(urn=urn, status="created", message=f"Document post published: {urn}")
 
 
 _OG_PATTERN = re.compile(

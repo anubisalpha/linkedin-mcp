@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "linkedin-mcp"
-version = "0.3.0"
+version = "0.4.0"
 description = "A ToS-compliant MCP server for LinkedIn using the official API"
 readme = "README.md"
 license = "MIT"

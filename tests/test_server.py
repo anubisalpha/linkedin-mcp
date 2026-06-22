@@ -27,7 +27,9 @@ from linkedin_mcp.server import (
     _handle_profile,
     _handle_status,
     _handle_text_post,
+    _handle_document_post,
     _handle_link_preview,
+    _handle_poll_post,
     _handle_post_history,
     _handle_setup,
     _handle_undo_last_post,
@@ -68,7 +70,9 @@ class TestListTools:
         assert "linkedin_create_image_post" in names
         assert "linkedin_delete_post" in names
         assert "linkedin_undo_last_post" in names
-        assert len(tools) == 14
+        assert "linkedin_create_poll" in names
+        assert "linkedin_create_document_post" in names
+        assert len(tools) == 16
 
     @pytest.mark.asyncio
     async def test_all_schemas_have_additional_properties_false(self):
@@ -875,6 +879,20 @@ class TestCallToolRoutingNewTools:
             await call_tool("linkedin_setup", {})
             m.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_routes_poll(self):
+        with patch("linkedin_mcp.server._handle_poll_post") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            await call_tool("linkedin_create_poll", {"text": "x", "question": "q", "options": ["a", "b"]})
+            m.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_routes_document_post(self):
+        with patch("linkedin_mcp.server._handle_document_post") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            await call_tool("linkedin_create_document_post", {"text": "x", "file_path": "/tmp/f.pdf"})
+            m.assert_called_once()
+
 
 class TestHealthCheckBranches:
     @pytest.mark.asyncio
@@ -1018,3 +1036,151 @@ class TestSetupBranches:
                 text = result.content[0].text
                 assert "Missing scopes" in text
                 assert "ready to use" not in text.lower()
+
+
+class TestHandlePollPost:
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_preview(self, mock_load):
+        mock_load.return_value = _make_token()
+        result = await _handle_poll_post({
+            "text": "What do you think?",
+            "question": "Best language?",
+            "options": ["Python", "Rust", "Go"],
+        })
+        text = result.content[0].text
+        assert "PREVIEW" in text
+        assert "Best language?" in text
+        assert "Python" in text
+        assert "Rust" in text
+        assert "Go" in text
+        assert "3 DAYS" in text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.history.record_post")
+    @patch("linkedin_mcp.server.api.create_poll_post")
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_confirm_publishes(self, mock_load, mock_create, mock_history):
+        mock_load.return_value = _make_token()
+        mock_create.return_value = PostResult(urn="urn:li:share:poll1", status="created", message="Poll published: urn:li:share:poll1")
+        result = await _handle_poll_post({
+            "text": "Vote!",
+            "question": "Fave colour?",
+            "options": ["Red", "Blue"],
+            "confirm": True,
+        })
+        text = result.content[0].text
+        assert "Poll published" in text
+        mock_create.assert_called_once()
+        mock_history.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_rejects_too_few_options(self, mock_load):
+        mock_load.return_value = _make_token()
+        result = await _handle_poll_post({
+            "text": "x", "question": "q?", "options": ["Only one"],
+        })
+        assert result.isError is True
+        assert "2-4 options" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_rejects_too_many_options(self, mock_load):
+        mock_load.return_value = _make_token()
+        result = await _handle_poll_post({
+            "text": "x", "question": "q?", "options": ["a", "b", "c", "d", "e"],
+        })
+        assert result.isError is True
+        assert "2-4 options" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_rejects_long_question(self, mock_load):
+        mock_load.return_value = _make_token()
+        result = await _handle_poll_post({
+            "text": "x", "question": "A" * 141, "options": ["a", "b"],
+        })
+        assert result.isError is True
+        assert "141 characters" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_rejects_long_option(self, mock_load):
+        mock_load.return_value = _make_token()
+        result = await _handle_poll_post({
+            "text": "x", "question": "q?", "options": ["OK", "X" * 31],
+        })
+        assert result.isError is True
+        assert "30-char limit" in result.content[0].text
+
+
+class TestHandleDocumentPost:
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_preview(self, mock_load, tmp_path):
+        mock_load.return_value = _make_token()
+        doc = tmp_path / "slides.pdf"
+        doc.write_bytes(b"%PDF-1.4 test content here")
+        result = await _handle_document_post({
+            "text": "Check out my slides",
+            "file_path": str(doc),
+            "title": "Q2 Review",
+        })
+        text = result.content[0].text
+        assert "PREVIEW" in text
+        assert "slides.pdf" in text
+        assert "Q2 Review" in text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.history.record_post")
+    @patch("linkedin_mcp.server.api.create_document_post")
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_confirm_publishes(self, mock_load, mock_create, mock_history, tmp_path):
+        mock_load.return_value = _make_token()
+        doc = tmp_path / "report.pdf"
+        doc.write_bytes(b"%PDF-1.4 test")
+        mock_create.return_value = PostResult(
+            urn="urn:li:share:doc1", status="created",
+            message="Document post published: urn:li:share:doc1",
+        )
+        result = await _handle_document_post({
+            "text": "New report", "file_path": str(doc), "confirm": True,
+        })
+        assert "Document post published" in result.content[0].text
+        mock_create.assert_called_once()
+        mock_history.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_rejects_missing_file(self, mock_load):
+        mock_load.return_value = _make_token()
+        result = await _handle_document_post({
+            "text": "x", "file_path": "/nonexistent/file.pdf",
+        })
+        assert result.isError is True
+        assert "File not found" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_rejects_unsupported_extension(self, mock_load, tmp_path):
+        mock_load.return_value = _make_token()
+        f = tmp_path / "notes.txt"
+        f.write_text("hello")
+        result = await _handle_document_post({
+            "text": "x", "file_path": str(f),
+        })
+        assert result.isError is True
+        assert "Unsupported file type" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_rejects_oversized_file(self, mock_load, tmp_path):
+        mock_load.return_value = _make_token()
+        f = tmp_path / "huge.pdf"
+        f.write_bytes(b"\x00" * (101 * 1024 * 1024))
+        result = await _handle_document_post({
+            "text": "x", "file_path": str(f),
+        })
+        assert result.isError is True
+        assert "100 MB" in result.content[0].text

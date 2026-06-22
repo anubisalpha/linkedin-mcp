@@ -6,6 +6,8 @@ Unlike other LinkedIn MCP servers that rely on scraping (which violates LinkedIn
 
 ## Quick start
 
+> **New to MCP servers?** Follow the step-by-step [Setup Guide](SETUP.md) — it covers everything from installing Python to your first post.
+
 ```bash
 git clone https://github.com/anubisalpha/linkedin-mcp.git
 cd linkedin-mcp

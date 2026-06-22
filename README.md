@@ -6,36 +6,9 @@ Unlike other LinkedIn MCP servers that rely on scraping (which violates LinkedIn
 
 ## Quick start
 
-> **New to MCP servers?** Follow the step-by-step [Setup Guide](SETUP.md) — it covers everything from installing Python to your first post.
+**Fastest way to get started:** Copy the setup prompt from **[SETUP_PROMPT.md](SETUP_PROMPT.md)** and paste it into Claude Code. Claude will clone the repo, install it, configure your credentials, and log you in — you just click "allow" on each step.
 
-```bash
-git clone https://github.com/anubisalpha/linkedin-mcp.git
-cd linkedin-mcp
-pip install -e .
-```
-
-Add to your Claude Code `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "linkedin": {
-      "command": "python",
-      "args": ["-m", "linkedin_mcp.server"],
-      "env": {
-        "LINKEDIN_CLIENT_ID": "your_client_id",
-        "LINKEDIN_CLIENT_SECRET": "your_client_secret"
-      }
-    }
-  }
-}
-```
-
-> **Important:** Replace `your_client_id` and `your_client_secret` with your actual values. Environment variable references like `${LINKEDIN_CLIENT_ID}` are not supported — use the literal strings.
-
-Restart Claude Code, then ask: *"Run linkedin_setup to check my configuration"*
-
-The setup assistant will check your credentials, show any missing steps, and guide you through first-time login.
+> Need to do it manually instead? Follow the step-by-step [Setup Guide](SETUP.md) or continue reading below.
 
 ## Features
 

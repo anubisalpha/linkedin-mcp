@@ -121,6 +121,10 @@ pytest tests/ -v
 
 See [docs/architecture.md](docs/architecture.md) for implementation details and design decisions.
 
+## Support
+
+If you find this useful, consider [buying me a coffee](https://buymeacoffee.com/anubisalpha). No pressure at all — but if you'd like to support the project, it's genuinely appreciated.
+
 ## License
 
 MIT

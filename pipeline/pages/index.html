@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LinkedIn Pipeline</title>
+<style>
+  :root {
+    --bg: #f8f9fa; --card: #fff; --border: #dee2e6;
+    --text: #212529; --muted: #6c757d; --tag: #e9ecef;
+    --success: #198754; --danger: #dc3545;
+    --accent: #6f42c1; --accent-hover: #5a32a3;
+    --linkedin: #0a66c2; --linkedin-hover: #004182;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+
+  /* ── Header ── */
+  .site-header { background: #1a1a2e; color: #fff; position: sticky; top: 0; z-index: 50; }
+  .site-header-inner { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 1.5rem; height: 56px; }
+  .site-brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; color: #fff; }
+  .site-brand svg { width: 24px; height: 24px; fill: #0a66c2; flex-shrink: 0; }
+  .site-brand span { font-size: 1.1rem; font-weight: 700; letter-spacing: -0.02em; }
+
+  /* ── Section header ── */
+  .section-header { background: var(--linkedin); color: #fff; padding: 0.75rem 2rem; display: flex; align-items: center; justify-content: space-between; }
+  .section-header-left { display: flex; align-items: center; gap: 0.75rem; }
+  .section-header svg { width: 22px; height: 22px; fill: #fff; flex-shrink: 0; }
+  .section-header h2 { font-size: 1.05rem; font-weight: 600; }
+
+  /* ── Pipeline ── */
+  .container { max-width: 1200px; margin: 0 auto; padding: 1.5rem; }
+  .pipeline { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+  @media (max-width: 900px) { .pipeline { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 520px) { .pipeline { grid-template-columns: 1fr; } }
+  .stage { background: var(--card); border: 1px solid var(--border); border-radius: 8px; min-height: 200px; }
+  .stage-header { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 0.92rem; display: flex; justify-content: space-between; align-items: center; }
+  .stage-header .count { background: var(--tag); border-radius: 10px; padding: 0.1rem 0.55rem; font-size: 0.78rem; color: var(--muted); }
+  .stage-list { padding: 0.5rem; }
+  .post-card { padding: 0.65rem 0.75rem; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 0.5rem; cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s; }
+  .post-card:hover { border-color: var(--linkedin); box-shadow: 0 0 0 1px var(--linkedin); }
+  .post-card .title { font-weight: 500; font-size: 0.88rem; margin-bottom: 0.25rem; word-break: break-word; }
+  .post-card .meta { font-size: 0.76rem; color: var(--muted); }
+  .post-card .type-badge { display: inline-block; background: var(--tag); border-radius: 3px; padding: 0.05rem 0.4rem; font-size: 0.7rem; text-transform: uppercase; font-weight: 600; margin-right: 0.35rem; }
+  .empty { padding: 1.5rem 1rem; text-align: center; color: var(--muted); font-size: 0.85rem; }
+
+  /* ── Modal ── */
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 100; justify-content: center; align-items: flex-start; padding: 2rem 1rem; overflow-y: auto; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: var(--card); border-radius: 10px; width: 100%; max-width: 720px; box-shadow: 0 8px 30px rgba(0,0,0,0.2); }
+  .modal-header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .modal-header h2 { font-size: 1.05rem; }
+  .modal-close { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--muted); padding: 0.25rem; }
+  .modal-body { padding: 1.25rem; }
+  .modal-footer { padding: 1rem 1.25rem; border-top: 1px solid var(--border); display: flex; justify-content: space-between; gap: 0.5rem; flex-wrap: wrap; }
+  .modal-footer-left { display: flex; gap: 0.5rem; }
+  .modal-footer-right { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+
+  /* ── Forms ── */
+  .field { margin-bottom: 1rem; }
+  .field label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--muted); margin-bottom: 0.3rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  .field .value { font-size: 0.93rem; }
+  .field input[type="text"], .field input[type="date"], .field select, .field textarea {
+    width: 100%; padding: 0.5rem 0.65rem; border: 1px solid var(--border); border-radius: 5px;
+    font-size: 0.9rem; font-family: inherit; background: var(--bg);
+  }
+  .field textarea { min-height: 150px; resize: vertical; line-height: 1.6; }
+  .field select { appearance: auto; }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  @media (max-width: 520px) { .field-row { grid-template-columns: 1fr; } }
+  .post-content { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; white-space: pre-wrap; font-size: 0.9rem; line-height: 1.6; max-height: 300px; overflow-y: auto; }
+  .tags { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+  .tag { background: var(--tag); border-radius: 3px; padding: 0.1rem 0.5rem; font-size: 0.78rem; }
+  .char-count { font-size: 0.78rem; color: var(--muted); text-align: right; margin-top: 0.25rem; }
+  .char-count.warn { color: #e67700; }
+  .char-count.over { color: var(--danger); font-weight: 600; }
+
+  /* ── Buttons ── */
+  .btn { padding: 0.45rem 1rem; border: 1px solid var(--border); border-radius: 5px; font-size: 0.83rem; cursor: pointer; font-weight: 500; transition: all 0.15s; background: var(--card); color: var(--text); }
+  .btn:hover { background: var(--bg); }
+  .btn-sm { padding: 0.3rem 0.7rem; font-size: 0.78rem; }
+  .btn-primary { background: var(--linkedin); color: #fff; border-color: var(--linkedin); }
+  .btn-primary:hover { background: var(--linkedin-hover); }
+  .btn-success { background: var(--success); color: #fff; border-color: var(--success); }
+  .btn-success:hover { opacity: 0.9; }
+  .btn-danger { color: var(--danger); border-color: var(--danger); background: var(--card); }
+  .btn-danger:hover { background: var(--danger); color: #fff; }
+  .btn-white { background: rgba(255,255,255,0.15); color: #fff; border-color: rgba(255,255,255,0.3); }
+  .btn-white:hover { background: rgba(255,255,255,0.25); }
+
+  /* ── Toast ── */
+  .toast { position: fixed; bottom: 1.5rem; right: 1.5rem; background: #212529; color: #fff; padding: 0.75rem 1.25rem; border-radius: 6px; font-size: 0.88rem; z-index: 200; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+
+  /* ── Confirm dialog ── */
+  .confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 300; justify-content: center; align-items: center; }
+  .confirm-overlay.open { display: flex; }
+  .confirm-box { background: var(--card); border-radius: 10px; padding: 1.5rem; max-width: 400px; width: 90%; box-shadow: 0 8px 30px rgba(0,0,0,0.2); }
+  .confirm-box p { margin-bottom: 1rem; font-size: 0.95rem; }
+  .confirm-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header-inner">
+    <a href="/" class="site-brand">
+      <svg viewBox="0 0 24 24"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+      <span>LinkedIn Pipeline</span>
+    </a>
+    <nav style="display:flex;gap:0.25rem">
+      <a href="/" style="color:#fff;text-decoration:none;padding:0.4rem 0.8rem;border-radius:5px;font-size:0.85rem;font-weight:500;background:rgba(255,255,255,0.15)">Pipeline</a>
+      <a href="/schedule" style="color:rgba(255,255,255,0.65);text-decoration:none;padding:0.4rem 0.8rem;border-radius:5px;font-size:0.85rem;font-weight:500">Schedule</a>
+    </nav>
+  </div>
+</header>
+
+<div class="section-header">
+  <div class="section-header-left">
+    <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+    <h2>Posting Pipeline</h2>
+  </div>
+  <button class="btn btn-white btn-sm" onclick="openCreateModal()">+ New Draft</button>
+</div>
+
+<div class="container">
+  <div class="pipeline" id="pipeline"></div>
+</div>
+
+<!-- View / Edit modal -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modal-title"></h2>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer">
+      <div class="modal-footer-left" id="modal-footer-left"></div>
+      <div class="modal-footer-right" id="modal-footer-right"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Create modal -->
+<div class="modal-overlay" id="create-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>New Draft</h2>
+      <button class="modal-close" onclick="closeCreateModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label>Title slug</label>
+        <input type="text" id="create-slug" placeholder="e.g. my-post-topic">
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Type</label>
+          <select id="create-type">
+            <option value="text">Text</option>
+            <option value="article">Article</option>
+            <option value="image">Image</option>
+            <option value="poll">Poll</option>
+            <option value="document">Document</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Visibility</label>
+          <select id="create-visibility">
+            <option value="PUBLIC">Public</option>
+            <option value="CONNECTIONS">Connections only</option>
+          </select>
+        </div>
+      </div>
+      <div class="field" id="create-url-field" style="display:none">
+        <label>URL</label>
+        <input type="text" id="create-url" placeholder="https://...">
+      </div>
+      <div class="field">
+        <label>Tags (comma-separated)</label>
+        <input type="text" id="create-tags" placeholder="e.g. WebDev, OpenSource">
+      </div>
+      <div class="field">
+        <label>Content</label>
+        <textarea id="create-body" placeholder="Write your post content..."></textarea>
+        <div class="char-count" id="create-char-count">0 / 3,000</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <div class="modal-footer-left"></div>
+      <div class="modal-footer-right">
+        <button class="btn" onclick="closeCreateModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="createPost()">Create Draft</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm dialog -->
+<div class="confirm-overlay" id="confirm-dialog">
+  <div class="confirm-box">
+    <p id="confirm-message"></p>
+    <div class="confirm-actions">
+      <button class="btn" onclick="confirmResolve(false)">Cancel</button>
+      <button class="btn btn-danger" id="confirm-btn" onclick="confirmResolve(true)">Delete</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+var STAGES = ["draft", "approved", "scheduled", "completed"];
+var STAGE_LABELS = { draft: "Draft", approved: "Approved", scheduled: "Scheduled", completed: "Completed" };
+var allPosts = {};
+var editingPost = null;
+var confirmCallback = null;
+
+/* ── API ── */
+function api(path, opts) {
+  return fetch("/api" + path, opts).then(function(r) { return r.json(); });
+}
+
+function loadPosts() {
+  return api("/posts").then(function(data) {
+    allPosts = data;
+    renderPipeline();
+  });
+}
+
+/* ── Pipeline rendering ── */
+function renderPipeline() {
+  var el = document.getElementById("pipeline");
+  el.innerHTML = STAGES.map(function(stage) {
+    var posts = allPosts[stage] || [];
+    var cards = posts.length
+      ? posts.map(function(p) {
+          var name = p.filename.replace(/\.md$/, "").replace(/^\d{4}-\d{2}-\d{2}-/, "").replace(/-/g, " ");
+          return '<div class="post-card" onclick="openPost(\'' + stage + '\',\'' + esc(p.filename).replace(/'/g, "\\'") + '\')">'
+            + '<div class="title">' + esc(name) + '</div>'
+            + '<div class="meta"><span class="type-badge">' + esc(p.type || "text") + '</span> '
+            + esc(p.target_date || "no date") + '</div></div>';
+        }).join("")
+      : '<div class="empty">No posts</div>';
+    return '<div class="stage"><div class="stage-header">' + STAGE_LABELS[stage]
+      + ' <span class="count">' + posts.length + '</span></div>'
+      + '<div class="stage-list">' + cards + '</div></div>';
+  }).join("");
+}
+
+function esc(s) { if (!s) return ""; var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+
+/* ── View post modal ── */
+function openPost(stage, filename) {
+  var posts = allPosts[stage] || [];
+  var post = posts.find(function(p) { return p.filename === filename; });
+  if (!post) return;
+
+  editingPost = { stage: stage, post: post };
+  document.getElementById("modal-title").textContent = filename;
+  renderViewMode();
+  document.getElementById("modal").classList.add("open");
+}
+
+function renderViewMode() {
+  var stage = editingPost.stage;
+  var post = editingPost.post;
+  var body = document.getElementById("modal-body");
+
+  document.getElementById("modal-title").textContent = post.filename;
+
+  var html = "";
+  if (post.type) html += viewField("Type", '<span class="type-badge">' + esc(post.type) + '</span>');
+  if (post.target_date) html += viewField("Scheduled for", esc(post.target_date) + (post.target_time ? ' at ' + esc(post.target_time) : ''));
+  if (post.visibility) html += viewField("Visibility", esc(post.visibility));
+  if (post.url) html += viewField("URL", '<a href="' + esc(post.url) + '" target="_blank" rel="noopener">' + esc(post.url) + '</a>');
+  if (post.tags) {
+    var tags = Array.isArray(post.tags) ? post.tags : [post.tags];
+    html += viewField("Tags", '<div class="tags">' + tags.map(function(t) { return '<span class="tag">' + esc(t) + '</span>'; }).join("") + '</div>');
+  }
+  var charCount = (post.body || "").length;
+  var countClass = charCount > 3000 ? "over" : charCount > 2700 ? "warn" : "";
+  html += viewField("Content", '<div class="post-content">' + esc(post.body) + '</div><div class="char-count ' + countClass + '">' + charCount.toLocaleString() + ' / 3,000</div>');
+  body.innerHTML = html;
+
+  var left = document.getElementById("modal-footer-left");
+  var right = document.getElementById("modal-footer-right");
+  var leftHtml = '<button class="btn btn-danger btn-sm" onclick="deletePost()">Delete</button>';
+  var rightHtml = "";
+
+  if (stage === "draft") {
+    rightHtml += '<button class="btn" onclick="switchToEditMode()">Edit</button>';
+    rightHtml += '<button class="btn btn-primary" onclick="movePost(\'draft\',\'approved\')">Approve</button>';
+  } else if (stage === "approved") {
+    rightHtml += '<button class="btn" onclick="movePost(\'approved\',\'draft\')">Back to Draft</button>';
+    rightHtml += '<button class="btn" onclick="switchToEditMode()">Edit</button>';
+    var existingTime = post.target_time || "09:00";
+    rightHtml += '<span style="display:flex;align-items:center;gap:0.4rem">'
+      + '<input type="date" id="schedule-date" value="' + esc(post.target_date || "") + '" style="padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:5px;font-size:0.83rem">'
+      + '<input type="time" id="schedule-time" value="' + esc(existingTime) + '" style="padding:0.4rem 0.6rem;border:1px solid var(--border);border-radius:5px;font-size:0.83rem">'
+      + '<button class="btn btn-success" onclick="schedulePost()">Schedule</button></span>';
+  } else if (stage === "scheduled") {
+    rightHtml += '<button class="btn" onclick="movePost(\'scheduled\',\'approved\')">Unschedule</button>';
+    rightHtml += '<button class="btn" onclick="switchToEditMode()">Edit</button>';
+    rightHtml += '<button class="btn btn-success" onclick="movePost(\'scheduled\',\'completed\')">Mark Completed</button>';
+  } else if (stage === "completed") {
+    rightHtml += '<button class="btn" onclick="movePost(\'completed\',\'draft\')">Revert to Draft</button>';
+  }
+
+  rightHtml += '<button class="btn" onclick="closeModal()">Close</button>';
+  left.innerHTML = leftHtml;
+  right.innerHTML = rightHtml;
+}
+
+function viewField(label, value) {
+  return '<div class="field"><label>' + label + '</label><div class="value">' + value + '</div></div>';
+}
+
+/* ── Edit mode ── */
+function switchToEditMode() {
+  var post = editingPost.post;
+  var body = document.getElementById("modal-body");
+  document.getElementById("modal-title").textContent = "Editing: " + post.filename;
+
+  var tags = "";
+  if (post.tags) {
+    tags = Array.isArray(post.tags) ? post.tags.join(", ") : post.tags;
+  }
+
+  var html = '<div class="field-row">'
+    + '<div class="field"><label>Type</label><select id="edit-type">'
+    + typeOptions(post.type || "text") + '</select></div>'
+    + '<div class="field"><label>Visibility</label><select id="edit-visibility">'
+    + '<option value="PUBLIC"' + (post.visibility === "PUBLIC" ? " selected" : "") + '>Public</option>'
+    + '<option value="CONNECTIONS"' + (post.visibility === "CONNECTIONS" ? " selected" : "") + '>Connections only</option>'
+    + '</select></div></div>';
+
+  html += '<div class="field" id="edit-url-field"' + (post.type === "article" ? "" : ' style="display:none"') + '>'
+    + '<label>URL</label><input type="text" id="edit-url" value="' + esc(post.url || "") + '"></div>';
+
+  html += '<div class="field"><label>Target date</label><input type="date" id="edit-target-date" value="' + esc(post.target_date || "") + '"></div>';
+  html += '<div class="field"><label>Target time</label><input type="time" id="edit-target-time" value="' + esc(post.target_time || "09:00") + '"></div>';
+
+  html += '<div class="field"><label>Tags (comma-separated)</label>'
+    + '<input type="text" id="edit-tags" value="' + esc(tags) + '"></div>';
+
+  html += '<div class="field"><label>Content</label>'
+    + '<textarea id="edit-body" oninput="updateEditCharCount()">' + esc(post.body || "") + '</textarea>'
+    + '<div class="char-count" id="edit-char-count">' + (post.body || "").length + ' / 3,000</div></div>';
+
+  body.innerHTML = html;
+
+  var typeSelect = document.getElementById("edit-type");
+  typeSelect.addEventListener("change", function() {
+    document.getElementById("edit-url-field").style.display = this.value === "article" ? "" : "none";
+  });
+
+  var left = document.getElementById("modal-footer-left");
+  var right = document.getElementById("modal-footer-right");
+  left.innerHTML = '<button class="btn" onclick="renderViewMode()">Cancel Edit</button>';
+  right.innerHTML = '<button class="btn btn-primary" onclick="saveEdit()">Save Changes</button>';
+}
+
+function typeOptions(selected) {
+  var types = ["text", "article", "image", "poll", "document"];
+  return types.map(function(t) {
+    return '<option value="' + t + '"' + (t === selected ? " selected" : "") + '>' + t.charAt(0).toUpperCase() + t.slice(1) + '</option>';
+  }).join("");
+}
+
+function updateEditCharCount() {
+  var ta = document.getElementById("edit-body");
+  var el = document.getElementById("edit-char-count");
+  if (ta && el) {
+    var len = ta.value.length;
+    el.textContent = len.toLocaleString() + " / 3,000";
+    el.className = "char-count" + (len > 3000 ? " over" : len > 2700 ? " warn" : "");
+  }
+}
+
+function saveEdit() {
+  var data = {
+    stage: editingPost.stage,
+    filename: editingPost.post.filename,
+    type: document.getElementById("edit-type").value,
+    visibility: document.getElementById("edit-visibility").value,
+    body: document.getElementById("edit-body").value,
+  };
+  var url = document.getElementById("edit-url");
+  if (url && url.value.trim()) data.url = url.value.trim();
+  var targetDate = document.getElementById("edit-target-date");
+  if (targetDate && targetDate.value) data.target_date = targetDate.value;
+  var targetTime = document.getElementById("edit-target-time");
+  if (targetTime && targetTime.value) data.target_time = targetTime.value;
+  var tagsInput = document.getElementById("edit-tags").value.trim();
+  if (tagsInput) data.tags = tagsInput.split(",").map(function(t) { return t.trim(); }).filter(Boolean);
+
+  api("/edit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  }).then(function(res) {
+    if (res.error) { toast(res.error); return; }
+    if (res.reverted) {
+      toast("Saved — moved back to Draft for re-approval");
+    } else {
+      toast("Saved");
+    }
+    closeModal();
+    loadPosts();
+  });
+}
+
+/* ── Create post ── */
+function openCreateModal() {
+  document.getElementById("create-slug").value = "";
+  document.getElementById("create-type").value = "text";
+  document.getElementById("create-visibility").value = "PUBLIC";
+  document.getElementById("create-url").value = "";
+  document.getElementById("create-url-field").style.display = "none";
+  document.getElementById("create-tags").value = "";
+  document.getElementById("create-body").value = "";
+  document.getElementById("create-char-count").textContent = "0 / 3,000";
+  document.getElementById("create-char-count").className = "char-count";
+  document.getElementById("create-modal").classList.add("open");
+}
+
+function closeCreateModal() {
+  document.getElementById("create-modal").classList.remove("open");
+}
+
+document.getElementById("create-type").addEventListener("change", function() {
+  document.getElementById("create-url-field").style.display = this.value === "article" ? "" : "none";
+});
+
+document.getElementById("create-body").addEventListener("input", function() {
+  var el = document.getElementById("create-char-count");
+  var len = this.value.length;
+  el.textContent = len.toLocaleString() + " / 3,000";
+  el.className = "char-count" + (len > 3000 ? " over" : len > 2700 ? " warn" : "");
+});
+
+function createPost() {
+  var slug = document.getElementById("create-slug").value.trim();
+  if (!slug) { toast("Enter a title slug"); return; }
+  var data = {
+    slug: slug,
+    type: document.getElementById("create-type").value,
+    visibility: document.getElementById("create-visibility").value,
+    body: document.getElementById("create-body").value,
+  };
+  var url = document.getElementById("create-url").value.trim();
+  if (url) data.url = url;
+  var tags = document.getElementById("create-tags").value.trim();
+  if (tags) data.tags = tags.split(",").map(function(t) { return t.trim(); }).filter(Boolean);
+
+  api("/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data)
+  }).then(function(res) {
+    if (res.error) { toast(res.error); return; }
+    toast("Draft created: " + res.filename);
+    closeCreateModal();
+    loadPosts();
+  });
+}
+
+/* ── Actions ── */
+function movePost(from, to) {
+  var filename = editingPost.post.filename;
+  api("/move", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ from: from, to: to, filename: filename })
+  }).then(function(res) {
+    if (res.error) { toast(res.error); return; }
+    closeModal();
+    toast("Moved to " + STAGE_LABELS[to]);
+    loadPosts();
+  });
+}
+
+function schedulePost() {
+  var date = document.getElementById("schedule-date").value;
+  var time = document.getElementById("schedule-time").value || "09:00";
+  if (!date) { toast("Pick a date first"); return; }
+  if (editingPost.post.char_count > 3000) {
+    toast("Post is " + editingPost.post.char_count + " characters — exceeds the 3,000 character limit. Edit the post before scheduling.");
+    return;
+  }
+  var filename = editingPost.post.filename;
+  api("/schedule", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename: filename, target_date: date, target_time: time })
+  }).then(function(res) {
+    if (res.error) { toast(res.error); return; }
+    closeModal();
+    toast("Scheduled for " + date);
+    loadPosts();
+  });
+}
+
+function deletePost() {
+  var filename = editingPost.post.filename;
+  showConfirm("Delete \"" + filename + "\"? This cannot be undone.", "Delete", function() {
+    api("/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stage: editingPost.stage, filename: filename })
+    }).then(function(res) {
+      if (res.error) { toast(res.error); return; }
+      closeModal();
+      toast("Deleted");
+      loadPosts();
+    });
+  });
+}
+
+/* ── Confirm dialog ── */
+function showConfirm(message, btnText, callback) {
+  document.getElementById("confirm-message").textContent = message;
+  document.getElementById("confirm-btn").textContent = btnText;
+  confirmCallback = callback;
+  document.getElementById("confirm-dialog").classList.add("open");
+}
+
+function confirmResolve(yes) {
+  document.getElementById("confirm-dialog").classList.remove("open");
+  if (yes && confirmCallback) confirmCallback();
+  confirmCallback = null;
+}
+
+/* ── Modal helpers ── */
+function closeModal() {
+  document.getElementById("modal").classList.remove("open");
+  editingPost = null;
+}
+
+document.getElementById("modal").addEventListener("click", function(e) {
+  if (e.target === e.currentTarget) closeModal();
+});
+document.getElementById("create-modal").addEventListener("click", function(e) {
+  if (e.target === e.currentTarget) closeCreateModal();
+});
+document.getElementById("confirm-dialog").addEventListener("click", function(e) {
+  if (e.target === e.currentTarget) confirmResolve(false);
+});
+
+/* ── Toast ── */
+function toast(msg) {
+  var el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  setTimeout(function() { el.classList.remove("show"); }, 2500);
+}
+
+/* ── Init ── */
+loadPosts();
+</script>
+</body>
+</html>

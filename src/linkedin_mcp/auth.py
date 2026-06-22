@@ -151,7 +151,7 @@ def exchange_code(code: str, client_id: str, client_secret: str) -> TokenData:
     token = TokenData(
         access_token=data["access_token"],
         expires_in=data["expires_in"],
-        scope=data.get("scope", ""),
+        scope=data.get("scope", "").replace(",", " "),
         refresh_token=data.get("refresh_token", ""),
         refresh_token_expires_in=data.get("refresh_token_expires_in", 0),
     )
@@ -194,7 +194,7 @@ def refresh_access_token(
     return TokenData(
         access_token=data["access_token"],
         expires_in=data["expires_in"],
-        scope=data.get("scope", ""),
+        scope=data.get("scope", "").replace(",", " "),
         refresh_token=data.get("refresh_token", refresh_token),
         refresh_token_expires_in=data.get("refresh_token_expires_in", 0),
     )

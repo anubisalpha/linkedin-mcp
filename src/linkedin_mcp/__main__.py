@@ -1,5 +1,11 @@
 import asyncio
 
-from .server import main
+from .server import main as _async_main
 
-asyncio.run(main())
+
+def main() -> None:
+    asyncio.run(_async_main())
+
+
+if __name__ == "__main__":
+    main()

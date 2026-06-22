@@ -11,3 +11,9 @@ venv/
 tokens.json
 TODO.md
 .coverage
+.claude/
+pipeline/draft/
+pipeline/approved/
+pipeline/scheduled/
+pipeline/completed/
+pipeline/posting-plan.md

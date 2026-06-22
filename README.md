@@ -10,9 +10,29 @@ Unlike other LinkedIn MCP servers that rely on scraping (which violates LinkedIn
 
 > Need to do it manually instead? Follow the step-by-step [Setup Guide](SETUP.md) or continue reading below.
 
-## Features
+## Posting pipeline
 
-### Tools
+A built-in web dashboard for managing your LinkedIn content from draft to publish. Write posts as markdown files, move them through a kanban board, schedule them for specific dates and times, and let Claude post them automatically when they're due.
+
+```
+Draft  →  Approved  →  Scheduled  →  Completed
+```
+
+**Quick setup:** Copy the prompt from **[PIPELINE_SETUP_PROMPT.md](PIPELINE_SETUP_PROMPT.md)** into Claude Code — it handles the install, auto-start, and scheduled posting for you.
+
+| Feature | Detail |
+|---|---|
+| **Kanban board** | Drag posts through each stage at [localhost:8420](http://localhost:8420) |
+| **Schedule view** | Calendar of upcoming posts with due/overdue alerts |
+| **Time-aware scheduling** | Set a specific date and time for each post |
+| **Auto-publish** | Claude Code scheduled task posts automatically when due (max 3 per run, 10s apart) |
+| **Edit safeguard** | Editing an approved or scheduled post moves it back to draft for re-approval |
+| **Character limit** | Posts over 3,000 characters cannot be scheduled |
+| **Zero dependencies** | Python stdlib only — no additional packages |
+
+See [pipeline/README.md](pipeline/README.md) for full manual setup, configuration, and schedule options.
+
+## MCP tools
 
 | Tool | Description |
 |---|---|
@@ -83,8 +103,24 @@ pytest tests/ -v
 
 ### Requirements
 
-- Python 3.10+
+- **[Claude Code](https://docs.anthropic.com/en/docs/claude-code)** — this is an MCP server designed for use with Claude Code (requires an Anthropic subscription: Pro, Max, Team, or Enterprise). It also works with Claude Desktop for Cowork integration. See the [deployment notes](#deployment) below for other surfaces.
+- **Python 3.10+**
 - A [LinkedIn Developer App](https://www.linkedin.com/developers/apps) with "Sign in with LinkedIn" and "Share on LinkedIn" enabled
+
+### Install
+
+```bash
+git clone https://github.com/anubisalpha/linkedin-mcp.git
+cd linkedin-mcp
+pip install -e .
+```
+
+This installs the `linkedin-mcp` CLI command. You can also run the server as a module:
+
+```bash
+linkedin-mcp          # CLI entry point
+python -m linkedin_mcp  # module entry point (equivalent)
+```
 
 ### Environment variables
 
@@ -116,6 +152,34 @@ pytest tests/ -v
 
 - **150 posts per day** per member
 - **100,000 API calls per day** per application
+
+## Deployment
+
+This server uses **stdio transport**, which means it runs locally alongside your MCP client.
+
+| Surface | Transport | Status | Notes |
+|---|---|---|---|
+| **Claude Code** | stdio via `.mcp.json` | Supported | Primary target. Requires an Anthropic subscription. |
+| **Claude Desktop / Cowork** | stdio via `claude_desktop_config.json` | Supported | Same server, different config file. Token cache is shared if on the same machine. |
+| **claude.ai (web)** | Streamable HTTP | Not supported | Would require hosting the server publicly over HTTPS with a different transport layer. |
+
+### `.mcp.json` example
+
+```json
+{
+  "mcpServers": {
+    "linkedin": {
+      "command": "linkedin-mcp",
+      "env": {
+        "LINKEDIN_CLIENT_ID": "your_client_id",
+        "LINKEDIN_CLIENT_SECRET": "your_client_secret"
+      }
+    }
+  }
+}
+```
+
+Use `linkedin-mcp` (the CLI entry point) or `python -m linkedin_mcp` as the command. Use literal credential values, not `${VAR}` references.
 
 ## Architecture
 

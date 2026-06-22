@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LinkedIn Pipeline — Schedule</title>
+<style>
+  :root {
+    --bg: #f8f9fa; --card: #fff; --border: #dee2e6;
+    --text: #212529; --muted: #6c757d; --tag: #e9ecef;
+    --success: #198754; --danger: #dc3545;
+    --linkedin: #0a66c2; --linkedin-hover: #004182;
+    --due: #fff3cd; --due-border: #ffc107;
+    --overdue: #f8d7da; --overdue-border: #dc3545;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.5; }
+
+  /* ── Header ── */
+  .site-header { background: #1a1a2e; color: #fff; position: sticky; top: 0; z-index: 50; }
+  .site-header-inner { max-width: 1200px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 0 1.5rem; height: 56px; }
+  .site-brand { display: flex; align-items: center; gap: 0.6rem; text-decoration: none; color: #fff; }
+  .site-brand svg { width: 24px; height: 24px; fill: #0a66c2; flex-shrink: 0; }
+  .site-brand span { font-size: 1.1rem; font-weight: 700; letter-spacing: -0.02em; }
+  .nav { display: flex; gap: 0.25rem; }
+  .nav a { color: rgba(255,255,255,0.65); text-decoration: none; padding: 0.4rem 0.8rem; border-radius: 5px; font-size: 0.85rem; font-weight: 500; }
+  .nav a:hover { color: #fff; background: rgba(255,255,255,0.08); }
+  .nav a.active { color: #fff; background: rgba(255,255,255,0.15); }
+
+  /* ── Section header ── */
+  .section-header { background: var(--linkedin); color: #fff; padding: 0.75rem 2rem; display: flex; align-items: center; gap: 0.75rem; }
+  .section-header svg { width: 22px; height: 22px; fill: #fff; flex-shrink: 0; }
+  .section-header h2 { font-size: 1.05rem; font-weight: 600; }
+
+  /* ── Layout ── */
+  .container { max-width: 900px; margin: 0 auto; padding: 1.5rem; }
+  .section-title { font-size: 1rem; font-weight: 700; margin-bottom: 0.75rem; display: flex; align-items: center; gap: 0.5rem; }
+  .section-title .badge { background: var(--linkedin); color: #fff; border-radius: 10px; padding: 0.1rem 0.6rem; font-size: 0.75rem; font-weight: 600; }
+  .section-title .badge.warn { background: var(--due-border); color: #000; }
+  .section-title .badge.danger { background: var(--danger); }
+
+  /* ── Alert ── */
+  .alert { padding: 1rem 1.25rem; border-radius: 8px; margin-bottom: 1.5rem; border: 1px solid; display: flex; align-items: flex-start; gap: 0.75rem; }
+  .alert svg { width: 20px; height: 20px; flex-shrink: 0; margin-top: 0.1rem; }
+  .alert-due { background: var(--due); border-color: var(--due-border); }
+  .alert-due svg { fill: #856404; }
+  .alert-overdue { background: var(--overdue); border-color: var(--overdue-border); }
+  .alert-overdue svg { fill: var(--danger); }
+  .alert-ok { background: #d1e7dd; border-color: var(--success); }
+  .alert-ok svg { fill: var(--success); }
+  .alert-body { flex: 1; }
+  .alert-title { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.15rem; }
+  .alert-text { font-size: 0.85rem; color: var(--muted); }
+
+  /* ── Schedule list ── */
+  .schedule-list { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 2rem; }
+  .schedule-item { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.25rem; display: flex; align-items: center; gap: 1rem; transition: border-color 0.15s; }
+  .schedule-item:hover { border-color: var(--linkedin); }
+  .schedule-item.due { border-left: 4px solid var(--due-border); }
+  .schedule-item.overdue { border-left: 4px solid var(--danger); }
+  .schedule-item.completed { opacity: 0.7; }
+
+  .date-col { min-width: 90px; text-align: center; }
+  .date-day { font-size: 1.6rem; font-weight: 700; line-height: 1; color: var(--linkedin); }
+  .date-month { font-size: 0.75rem; text-transform: uppercase; font-weight: 600; color: var(--muted); letter-spacing: 0.04em; }
+  .date-year { font-size: 0.7rem; color: var(--muted); }
+  .date-label { font-size: 0.7rem; font-weight: 600; margin-top: 0.2rem; border-radius: 3px; padding: 0.05rem 0.35rem; display: inline-block; }
+  .date-label.today { background: var(--due); color: #856404; }
+  .date-label.overdue { background: var(--overdue); color: var(--danger); }
+  .date-label.posted { background: #d1e7dd; color: var(--success); }
+
+  .content-col { flex: 1; min-width: 0; }
+  .content-title { font-weight: 600; font-size: 0.95rem; margin-bottom: 0.2rem; word-break: break-word; }
+  .content-meta { font-size: 0.78rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+  .type-badge { display: inline-block; background: var(--tag); border-radius: 3px; padding: 0.05rem 0.4rem; font-size: 0.7rem; text-transform: uppercase; font-weight: 600; }
+  .content-preview { font-size: 0.82rem; color: var(--muted); margin-top: 0.35rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  .action-col { display: flex; flex-direction: column; gap: 0.35rem; align-items: flex-end; }
+
+  /* ── Buttons ── */
+  .btn { padding: 0.4rem 0.9rem; border: 1px solid var(--border); border-radius: 5px; font-size: 0.8rem; cursor: pointer; font-weight: 500; transition: all 0.15s; background: var(--card); color: var(--text); white-space: nowrap; }
+  .btn:hover { background: var(--bg); }
+  .btn-primary { background: var(--linkedin); color: #fff; border-color: var(--linkedin); }
+  .btn-primary:hover { background: var(--linkedin-hover); }
+  .btn-success { background: var(--success); color: #fff; border-color: var(--success); }
+  .btn-success:hover { opacity: 0.9; }
+
+  .empty-state { text-align: center; padding: 3rem 1rem; color: var(--muted); }
+  .empty-state svg { width: 48px; height: 48px; fill: var(--border); margin-bottom: 0.75rem; }
+  .empty-state p { font-size: 0.9rem; }
+
+  /* ── Stats bar ── */
+  .stats-bar { display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+  .stat-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 1rem 1.25rem; flex: 1; min-width: 120px; }
+  .stat-value { font-size: 1.8rem; font-weight: 700; line-height: 1; color: var(--linkedin); }
+  .stat-label { font-size: 0.78rem; color: var(--muted); font-weight: 500; margin-top: 0.2rem; }
+
+  /* ── Modal ── */
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 100; justify-content: center; align-items: flex-start; padding: 2rem 1rem; overflow-y: auto; }
+  .modal-overlay.open { display: flex; }
+  .modal { background: var(--card); border-radius: 10px; width: 100%; max-width: 680px; box-shadow: 0 8px 30px rgba(0,0,0,0.2); }
+  .modal-header { padding: 1rem 1.25rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .modal-header h2 { font-size: 1.05rem; }
+  .modal-close { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--muted); padding: 0.25rem; }
+  .modal-body { padding: 1.25rem; }
+  .modal-footer { padding: 1rem 1.25rem; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 0.5rem; }
+  .field { margin-bottom: 1rem; }
+  .field label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--muted); margin-bottom: 0.3rem; text-transform: uppercase; letter-spacing: 0.03em; }
+  .post-content { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 1rem; white-space: pre-wrap; font-size: 0.9rem; line-height: 1.6; max-height: 300px; overflow-y: auto; }
+  .tags { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+  .tag { background: var(--tag); border-radius: 3px; padding: 0.1rem 0.5rem; font-size: 0.78rem; }
+  .char-count { font-size: 0.78rem; color: var(--muted); text-align: right; margin-top: 0.25rem; }
+
+  /* ── Confirm ── */
+  .confirm-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 300; justify-content: center; align-items: center; }
+  .confirm-overlay.open { display: flex; }
+  .confirm-box { background: var(--card); border-radius: 10px; padding: 1.5rem; max-width: 440px; width: 90%; box-shadow: 0 8px 30px rgba(0,0,0,0.2); }
+  .confirm-box p { margin-bottom: 1rem; font-size: 0.95rem; line-height: 1.5; }
+  .confirm-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+
+  /* ── Toast ── */
+  .toast { position: fixed; bottom: 1.5rem; right: 1.5rem; background: #212529; color: #fff; padding: 0.75rem 1.25rem; border-radius: 6px; font-size: 0.88rem; z-index: 200; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
+  .toast.show { opacity: 1; }
+
+  @media (max-width: 600px) {
+    .schedule-item { flex-direction: column; align-items: flex-start; }
+    .date-col { display: flex; gap: 0.5rem; align-items: center; min-width: unset; }
+    .action-col { flex-direction: row; width: 100%; }
+    .stats-bar { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="site-header-inner">
+    <a href="/" class="site-brand">
+      <svg viewBox="0 0 24 24"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>
+      <span>LinkedIn Pipeline</span>
+    </a>
+    <nav class="nav">
+      <a href="/">Pipeline</a>
+      <a href="/schedule" class="active">Schedule</a>
+    </nav>
+  </div>
+</header>
+
+<div class="section-header">
+  <svg viewBox="0 0 24 24"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20a2 2 0 002 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2zM9 14H7v-2h2v2zm4 0h-2v-2h2v2zm4 0h-2v-2h2v2zm-8 4H7v-2h2v2zm4 0h-2v-2h2v2zm4 0h-2v-2h2v2z"/></svg>
+  <h2>Schedule</h2>
+</div>
+
+<div class="container">
+  <div id="alert-area"></div>
+
+  <div class="stats-bar" id="stats-bar"></div>
+
+  <div id="upcoming-section"></div>
+
+  <div id="completed-section"></div>
+</div>
+
+<!-- View modal -->
+<div class="modal-overlay" id="modal">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 id="modal-title"></h2>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<!-- Confirm dialog -->
+<div class="confirm-overlay" id="confirm-dialog">
+  <div class="confirm-box">
+    <p id="confirm-message"></p>
+    <div class="confirm-actions">
+      <button class="btn" onclick="confirmResolve(false)">Cancel</button>
+      <button class="btn btn-success" id="confirm-btn" onclick="confirmResolve(true)">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+var today = "";
+var confirmCallback = null;
+
+function api(path, opts) {
+  return fetch("/api" + path, opts).then(function(r) { return r.json(); });
+}
+
+function loadSchedule() {
+  api("/schedule-view").then(function(data) {
+    today = data.today;
+    renderAlerts(data.scheduled);
+    renderStats(data.scheduled, data.completed);
+    renderUpcoming(data.scheduled);
+    renderCompleted(data.completed);
+  });
+}
+
+function parseDate(dateStr) {
+  if (!dateStr) return null;
+  var parts = dateStr.split("-");
+  return { year: parts[0], month: parts[1], day: parts[2] };
+}
+
+function currentTime() {
+  var n = new Date();
+  return ("0" + n.getHours()).slice(-2) + ":" + ("0" + n.getMinutes()).slice(-2);
+}
+
+function isDue(post) {
+  if (!post.target_date) return false;
+  if (post.target_date < today) return false;
+  if (post.target_date !== today) return false;
+  var tt = post.target_time || "09:00";
+  return currentTime() >= tt;
+}
+
+function isOverdue(post) {
+  if (!post.target_date) return false;
+  return post.target_date < today;
+}
+
+function isDueOrOverdue(post) {
+  return isDue(post) || isOverdue(post);
+}
+
+function formatTime(t) {
+  if (!t) return "";
+  var parts = t.split(":");
+  var h = parseInt(parts[0]), m = parts[1];
+  var ampm = h >= 12 ? "PM" : "AM";
+  if (h === 0) h = 12;
+  else if (h > 12) h -= 12;
+  return h + ":" + m + " " + ampm;
+}
+
+var MONTHS = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function renderAlerts(scheduled) {
+  var el = document.getElementById("alert-area");
+  var dueToday = scheduled.filter(isDue);
+  var overdueList = scheduled.filter(isOverdue);
+
+  var html = "";
+  if (overdueList.length > 0) {
+    html += '<div class="alert alert-overdue">'
+      + '<svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>'
+      + '<div class="alert-body"><div class="alert-title">' + overdueList.length + ' overdue post' + (overdueList.length > 1 ? "s" : "") + '</div>'
+      + '<div class="alert-text">These posts were scheduled before today and haven\'t been posted yet.</div></div></div>';
+  }
+  if (dueToday.length > 0) {
+    html += '<div class="alert alert-due">'
+      + '<svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>'
+      + '<div class="alert-body"><div class="alert-title">' + dueToday.length + ' post' + (dueToday.length > 1 ? "s" : "") + ' due today</div>'
+      + '<div class="alert-text">Ready to publish — click to review and post.</div></div></div>';
+  }
+  if (overdueList.length === 0 && dueToday.length === 0 && scheduled.length > 0) {
+    var next = scheduled.slice().sort(function(a, b) {
+      var cmp = (a.target_date || "").localeCompare(b.target_date || "");
+      if (cmp !== 0) return cmp;
+      return (a.target_time || "09:00").localeCompare(b.target_time || "09:00");
+    })[0];
+    var nextLabel = esc(next.target_date || "unknown") + (next.target_time ? " at " + formatTime(next.target_time) : "");
+    html += '<div class="alert alert-ok">'
+      + '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>'
+      + '<div class="alert-body"><div class="alert-title">All caught up</div>'
+      + '<div class="alert-text">Next post scheduled for ' + nextLabel + '.</div></div></div>';
+  }
+  el.innerHTML = html;
+}
+
+function renderStats(scheduled, completed) {
+  var el = document.getElementById("stats-bar");
+  var dueCount = scheduled.filter(isDueOrOverdue).length;
+  el.innerHTML = '<div class="stat-card"><div class="stat-value">' + scheduled.length + '</div><div class="stat-label">Scheduled</div></div>'
+    + '<div class="stat-card"><div class="stat-value">' + dueCount + '</div><div class="stat-label">Due / Overdue</div></div>'
+    + '<div class="stat-card"><div class="stat-value">' + completed.length + '</div><div class="stat-label">Completed</div></div>';
+}
+
+function renderUpcoming(scheduled) {
+  var el = document.getElementById("upcoming-section");
+  if (scheduled.length === 0) {
+    el.innerHTML = '<div class="empty-state"><svg viewBox="0 0 24 24"><path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20a2 2 0 002 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10z"/></svg>'
+      + '<p>No posts scheduled.<br>Approve and schedule posts from the <a href="/">Pipeline</a>.</p></div>';
+    return;
+  }
+
+  var sorted = scheduled.slice().sort(function(a, b) {
+    var cmp = (a.target_date || "9999").localeCompare(b.target_date || "9999");
+    if (cmp !== 0) return cmp;
+    return (a.target_time || "09:00").localeCompare(b.target_time || "09:00");
+  });
+
+  var html = '<div class="section-title">Upcoming';
+  var dueCount = sorted.filter(isDueOrOverdue).length;
+  if (dueCount > 0) html += ' <span class="badge warn">' + dueCount + ' due</span>';
+  html += '</div><div class="schedule-list">';
+
+  sorted.forEach(function(post) {
+    var d = parseDate(post.target_date);
+    var postIsDue = isDue(post);
+    var postIsOverdue = isOverdue(post);
+    var itemClass = "schedule-item" + (postIsOverdue ? " overdue" : postIsDue ? " due" : "");
+    var name = post.filename.replace(/\.md$/, "").replace(/^\d{4}-\d{2}-\d{2}-/, "").replace(/-/g, " ");
+
+    html += '<div class="' + itemClass + '">';
+    html += '<div class="date-col">';
+    if (d) {
+      html += '<div class="date-day">' + parseInt(d.day) + '</div>';
+      html += '<div class="date-month">' + MONTHS[parseInt(d.month)] + '</div>';
+      html += '<div class="date-year">' + d.year + '</div>';
+      if (post.target_time) html += '<div style="font-size:0.72rem;color:var(--muted);margin-top:0.1rem">' + formatTime(post.target_time) + '</div>';
+      if (postIsOverdue) html += '<div class="date-label overdue">Overdue</div>';
+      else if (postIsDue) html += '<div class="date-label today">Due</div>';
+    }
+    html += '</div>';
+    html += '<div class="content-col">';
+    html += '<div class="content-title">' + esc(name) + '</div>';
+    html += '<div class="content-meta"><span class="type-badge">' + esc(post.type || "text") + '</span>';
+    html += '<span>' + esc(post.visibility || "PUBLIC") + '</span>';
+    html += '<span>' + (post.char_count || 0) + ' chars</span></div>';
+    if (post.body) html += '<div class="content-preview">' + esc(post.body.substring(0, 150)) + '</div>';
+    html += '</div>';
+    html += '<div class="action-col">';
+    html += '<button class="btn btn-primary" onclick="viewPost(\'' + esc(post.filename).replace(/'/g, "\\'") + '\')">Review</button>';
+    if (postIsDue || postIsOverdue) {
+      html += '<button class="btn btn-success" onclick="postNow(\'' + esc(post.filename).replace(/'/g, "\\'") + '\')">Post Now</button>';
+    }
+    html += '</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function renderCompleted(completed) {
+  var el = document.getElementById("completed-section");
+  if (completed.length === 0) { el.innerHTML = ""; return; }
+
+  var html = '<div class="section-title">Recently Completed <span class="badge">' + completed.length + '</span></div>';
+  html += '<div class="schedule-list">';
+
+  completed.forEach(function(post) {
+    var dateStr = post.posted_date || post.target_date || "";
+    var d = parseDate(dateStr.split(" ")[0]);
+    var name = post.filename.replace(/\.md$/, "").replace(/^\d{4}-\d{2}-\d{2}-/, "").replace(/-/g, " ");
+
+    html += '<div class="schedule-item completed">';
+    html += '<div class="date-col">';
+    if (d) {
+      html += '<div class="date-day">' + parseInt(d.day) + '</div>';
+      html += '<div class="date-month">' + MONTHS[parseInt(d.month)] + '</div>';
+      html += '<div class="date-year">' + d.year + '</div>';
+      html += '<div class="date-label posted">Posted</div>';
+    }
+    html += '</div>';
+    html += '<div class="content-col">';
+    html += '<div class="content-title">' + esc(name) + '</div>';
+    html += '<div class="content-meta"><span class="type-badge">' + esc(post.type || "text") + '</span>';
+    if (post.posted_date) html += '<span>Posted: ' + esc(post.posted_date) + '</span>';
+    html += '</div>';
+    html += '</div>';
+    html += '<div class="action-col">';
+    html += '<button class="btn" onclick="viewPost(\'' + esc(post.filename).replace(/'/g, "\\'") + '\',true)">View</button>';
+    html += '</div>';
+    html += '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+/* ── View modal ── */
+function viewPost(filename, isCompleted) {
+  var endpoint = isCompleted ? "completed" : "scheduled";
+  api("/posts").then(function(data) {
+    var posts = data[endpoint] || [];
+    var post = posts.find(function(p) { return p.filename === filename; });
+    if (!post) { toast("Post not found"); return; }
+
+    document.getElementById("modal-title").textContent = filename;
+    var body = document.getElementById("modal-body");
+    var html = "";
+    if (post.type) html += viewField("Type", '<span class="type-badge">' + esc(post.type) + '</span>');
+    if (post.target_date) {
+      var schedLabel = esc(post.target_date) + (post.target_time ? " at " + formatTime(post.target_time) : "");
+      html += viewField("Scheduled for", schedLabel);
+    }
+    if (post.posted_date) html += viewField("Posted", esc(post.posted_date));
+    if (post.visibility) html += viewField("Visibility", esc(post.visibility));
+    if (post.url) html += viewField("URL", '<a href="' + esc(post.url) + '" target="_blank" rel="noopener">' + esc(post.url) + '</a>');
+    if (post.tags) {
+      var tags = Array.isArray(post.tags) ? post.tags : [post.tags];
+      html += viewField("Tags", '<div class="tags">' + tags.map(function(t) { return '<span class="tag">' + esc(t) + '</span>'; }).join("") + '</div>');
+    }
+    var charCount = (post.body || "").length;
+    html += viewField("Content", '<div class="post-content">' + esc(post.body) + '</div><div class="char-count">' + charCount.toLocaleString() + ' / 3,000</div>');
+    body.innerHTML = html;
+
+    var footer = document.getElementById("modal-footer");
+    if (isCompleted) {
+      footer.innerHTML = '<button class="btn" onclick="closeModal()">Close</button>';
+    } else {
+      var postReady = isDue(post) || isOverdue(post);
+      footer.innerHTML = (postReady ? '<button class="btn btn-success" onclick="postNow(\'' + esc(filename).replace(/'/g, "\\'") + '\')">Post Now</button>' : '')
+        + '<button class="btn" onclick="closeModal()">Close</button>';
+    }
+    document.getElementById("modal").classList.add("open");
+  });
+}
+
+function viewField(label, value) {
+  return '<div class="field"><label>' + label + '</label><div class="value">' + value + '</div></div>';
+}
+
+/* ── Post Now ── */
+function postNow(filename) {
+  closeModal();
+  showConfirm(
+    "Mark \"" + filename.replace(/\.md$/, "").replace(/^\d{4}-\d{2}-\d{2}-/, "").replace(/-/g, " ") + "\" as posted?\n\nThis will move it to Completed with today's timestamp. Make sure you've published it via the LinkedIn MCP tools first.",
+    "Mark as Posted",
+    function() {
+      api("/mark-posted", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: filename })
+      }).then(function(res) {
+        if (res.error) { toast(res.error); return; }
+        toast("Marked as posted");
+        loadSchedule();
+      });
+    }
+  );
+}
+
+/* ── Confirm ── */
+function showConfirm(message, btnText, callback) {
+  document.getElementById("confirm-message").textContent = message;
+  document.getElementById("confirm-btn").textContent = btnText;
+  confirmCallback = callback;
+  document.getElementById("confirm-dialog").classList.add("open");
+}
+
+function confirmResolve(yes) {
+  document.getElementById("confirm-dialog").classList.remove("open");
+  if (yes && confirmCallback) confirmCallback();
+  confirmCallback = null;
+}
+
+function closeModal() { document.getElementById("modal").classList.remove("open"); }
+document.getElementById("modal").addEventListener("click", function(e) { if (e.target === e.currentTarget) closeModal(); });
+document.getElementById("confirm-dialog").addEventListener("click", function(e) { if (e.target === e.currentTarget) confirmResolve(false); });
+
+function esc(s) { if (!s) return ""; var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
+function toast(msg) { var el = document.getElementById("toast"); el.textContent = msg; el.classList.add("show"); setTimeout(function() { el.classList.remove("show"); }, 2500); }
+
+loadSchedule();
+</script>
+</body>
+</html>

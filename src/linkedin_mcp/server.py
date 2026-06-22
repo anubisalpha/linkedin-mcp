@@ -1067,6 +1067,79 @@ async def _handle_setup() -> CallToolResult:
         status = "set" if val else "default"
         steps.append(f"  {var}: {status} — {desc}")
 
+    # 6. Posting pipeline
+    steps.append("")
+    steps.append("-" * 40)
+    steps.append("Posting Pipeline (optional)")
+    steps.append("-" * 40)
+    steps.append("")
+
+    from pathlib import Path
+
+    pipeline_dir = Path(__file__).resolve().parent.parent.parent / "pipeline"
+    pipeline_server = pipeline_dir / "server.py"
+    pipeline_pages = pipeline_dir / "pages" / "index.html"
+
+    if pipeline_server.exists() and pipeline_pages.exists():
+        steps.append("[OK]   Pipeline installed")
+        steps.append(f"       Location: {pipeline_dir}")
+
+        pipeline_port = os.environ.get("PORT", "8420")
+        steps.append(f"       Port: {pipeline_port}")
+
+        stage_counts = {}
+        for stage in ("draft", "approved", "scheduled", "completed"):
+            stage_dir = pipeline_dir / stage
+            if stage_dir.exists():
+                count = len(list(stage_dir.glob("*.md")))
+                stage_counts[stage] = count
+            else:
+                stage_counts[stage] = 0
+
+        if any(stage_counts.values()):
+            steps.append(f"       Posts: {stage_counts['draft']} draft, "
+                         f"{stage_counts['approved']} approved, "
+                         f"{stage_counts['scheduled']} scheduled, "
+                         f"{stage_counts['completed']} completed")
+        else:
+            steps.append("       No posts yet — create your first post in the web UI")
+
+        steps.append("")
+        steps.append("  To start the pipeline server:")
+        steps.append(f"    python {pipeline_server}")
+        steps.append(f"    Open http://localhost:{pipeline_port}")
+        steps.append("")
+        steps.append("  To set up automated posting (optional):")
+        steps.append('    Ask Claude: "Set up a LinkedIn posting check that runs daily at 9 AM"')
+    elif pipeline_dir.exists():
+        steps.append("[WARN] Pipeline directory found but incomplete")
+        steps.append(f"       Location: {pipeline_dir}")
+        if not pipeline_server.exists():
+            steps.append("       Missing: server.py")
+        if not pipeline_pages.exists():
+            steps.append("       Missing: pages/index.html")
+        steps.append("       Try reinstalling: pip install -e . or re-clone the repository")
+    else:
+        steps.append("[INFO] Pipeline not installed")
+        steps.append("")
+        steps.append("  The posting pipeline is an optional web dashboard for managing a")
+        steps.append("  draft → approve → schedule → publish workflow for LinkedIn posts.")
+        steps.append("")
+        steps.append("  Features:")
+        steps.append("  - Kanban board for post management")
+        steps.append("  - Schedule view with due/overdue alerts")
+        steps.append("  - Time-aware scheduling (specific date and time per post)")
+        steps.append("  - Automated publishing via Claude Code scheduled tasks")
+        steps.append("  - Edit safeguard (edits revert to draft for re-approval)")
+        steps.append("")
+        steps.append("  To install:")
+        steps.append("  The pipeline/ directory should be in the project root alongside src/.")
+        steps.append("  If you cloned the repo, it's already there. If you installed via pip,")
+        steps.append("  clone the repo to get the pipeline:")
+        steps.append("    git clone https://github.com/anubisalpha/linkedin-mcp.git")
+        steps.append("    cd linkedin-mcp/pipeline")
+        steps.append("    python server.py")
+
     # Summary
     steps.append("")
     steps.append("=" * 40)

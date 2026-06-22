@@ -32,6 +32,9 @@ dev = [
     "mypy>=1.10",
 ]
 
+[project.scripts]
+linkedin-mcp = "linkedin_mcp.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/anubisalpha/linkedin-mcp"
 Issues = "https://github.com/anubisalpha/linkedin-mcp/issues"

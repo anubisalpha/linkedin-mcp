@@ -70,6 +70,22 @@ class TestExchangeCode:
         assert token.refresh_token_expires_in == 0
 
 
+    @patch("linkedin_mcp.auth.httpx.post")
+    def test_normalises_comma_separated_scopes(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "access_token": "token",
+                "expires_in": 3600,
+                "scope": "email,openid,profile,w_member_social",
+            },
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        token = auth.exchange_code("code", "id", "secret")
+        assert set(token.scope.split()) == {"email", "openid", "profile", "w_member_social"}
+
+
 class TestFetchSub:
     @patch("linkedin_mcp.auth.httpx.get")
     def test_returns_sub_from_userinfo(self, mock_get):
@@ -131,6 +147,22 @@ class TestRefreshAccessToken:
 
         token = auth.refresh_access_token("original_refresh", "id", "secret")
         assert token.refresh_token == "original_refresh"
+
+
+    @patch("linkedin_mcp.auth.httpx.post")
+    def test_normalises_comma_separated_scopes_on_refresh(self, mock_post):
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "access_token": "refreshed",
+                "expires_in": 3600,
+                "scope": "email,openid,profile,w_member_social",
+            },
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        token = auth.refresh_access_token("refresh_tok", "id", "secret")
+        assert set(token.scope.split()) == {"email", "openid", "profile", "w_member_social"}
 
 
 class TestAutoRefresh:

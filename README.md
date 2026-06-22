@@ -81,7 +81,7 @@ All write operations require explicit user approval before executing, keeping th
 
 ### Testing
 
-The project includes a comprehensive test suite with **184 unit tests** (95% coverage) covering all modules:
+The project includes a comprehensive test suite with **197 unit tests** (99% coverage) covering all modules:
 
 ```bash
 pip install -e ".[dev]"
@@ -91,11 +91,11 @@ pytest tests/ -v
 | Test file | Tests | Coverage |
 |---|---|---|
 | `test_models.py` | 24 | Encryption, token save/load, expiry, backward compatibility, configurable key |
-| `test_auth.py` | 24 | OAuth flow, token refresh, auto-refresh logic, configurable port, callback handler |
+| `test_auth.py` | 29 | OAuth flow, token refresh, auto-refresh logic, configurable port, callback handler, real HTTP callback tests |
 | `test_api.py` | 26 | Post building, approval stamp, API calls, URL encoding, image upload, link preview |
 | `test_audit.py` | 7 | NDJSON logging, truncation, directory creation, configurable path |
 | `test_history.py` | 14 | Post recording, retrieval, filtering, deletion, corruption handling |
-| `test_server.py` | 89 | All tool handlers, call routing, preview enforcement, health check, undo, char count, scope verification, setup, MCP Inspector |
+| `test_server.py` | 97 | All tool handlers, call routing, preview enforcement, health check branches, undo, char count, scope verification, setup branches, MCP Inspector |
 
 ## Setting up a LinkedIn Developer App
 

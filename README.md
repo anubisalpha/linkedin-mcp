@@ -76,99 +76,15 @@ pytest tests/ -v
 | `test_history.py` | 14 | Post recording, retrieval, filtering, deletion, corruption handling |
 | `test_server.py` | 108 | All tool handlers, call routing, preview enforcement, health check, undo, polls, documents, setup, MCP Inspector |
 
-## Setting up a LinkedIn Developer App
+## Setup
 
-Before you can use this MCP server, you need a LinkedIn Developer App. Here's how:
-
-### 1. Create the app
-
-Go to [linkedin.com/developers/apps](https://www.linkedin.com/developers/apps) and click **Create app**.
-
-You'll need:
-- **App name** — e.g. "My LinkedIn MCP"
-- **LinkedIn Page** — link to any LinkedIn company page you admin (or create one)
-- **App logo** — a square PNG image (minimum 100x100px)
-- **Privacy policy URL** — a URL to your privacy policy (you can host one via GitHub Pages — see below)
-
-### 2. Enable the required products
-
-On your app's **Products** tab, request access to:
-- **Sign in with LinkedIn using OpenID Connect** — grants `openid`, `profile`, `email` scopes
-- **Share on LinkedIn** — grants `w_member_social` scope
-
-Both are self-serve and activate immediately.
-
-### 3. Configure the redirect URL
-
-On the **Auth** tab:
-1. Copy your **Client ID** and **Client Secret**
-2. Under **Authorized redirect URLs for your app**, add: `http://localhost:8585/callback` (or your custom port if using `LINKEDIN_MCP_CALLBACK_PORT`)
-
-### 4. Privacy policy (if you need one)
-
-If you don't have a privacy policy URL, you can use GitHub Pages:
-
-1. Fork this repository
-2. Go to your fork's **Settings > Pages**
-3. Set source to **Deploy from a branch**, branch `main`, folder `/docs`
-4. Your privacy policy will be at: `https://yourusername.github.io/linkedin-mcp/privacy-policy`
-
-A template privacy policy is included at [`docs/privacy-policy.md`](docs/privacy-policy.md).
-
-## Installation
+- **[Setup Prompt](SETUP_PROMPT.md)** — paste into Claude Code and let it do everything for you
+- **[Manual Setup Guide](SETUP.md)** — step-by-step if you prefer to do it yourself
 
 ### Requirements
 
 - Python 3.10+
-- A configured LinkedIn Developer App (see above)
-
-### Install
-
-```bash
-git clone https://github.com/anubisalpha/linkedin-mcp.git
-cd linkedin-mcp
-pip install -e .
-```
-
-## Configuration
-
-### Claude Code
-
-Add to your project `.mcp.json` or `~/.claude/.mcp.json` (global):
-
-```json
-{
-  "mcpServers": {
-    "linkedin": {
-      "command": "python",
-      "args": ["-m", "linkedin_mcp.server"],
-      "env": {
-        "LINKEDIN_CLIENT_ID": "your_client_id",
-        "LINKEDIN_CLIENT_SECRET": "your_client_secret"
-      }
-    }
-  }
-}
-```
-
-### Claude Desktop
-
-Add to your `claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "linkedin": {
-      "command": "python",
-      "args": ["-m", "linkedin_mcp.server"],
-      "env": {
-        "LINKEDIN_CLIENT_ID": "your_client_id",
-        "LINKEDIN_CLIENT_SECRET": "your_client_secret"
-      }
-    }
-  }
-}
-```
+- A [LinkedIn Developer App](https://www.linkedin.com/developers/apps) with "Sign in with LinkedIn" and "Share on LinkedIn" enabled
 
 ### Environment variables
 
@@ -176,54 +92,25 @@ Add to your `claude_desktop_config.json`:
 |---|---|---|
 | `LINKEDIN_CLIENT_ID` | Yes | Your LinkedIn app's Client ID |
 | `LINKEDIN_CLIENT_SECRET` | Yes | Your LinkedIn app's Client Secret |
-| `LINKEDIN_MCP_TOKEN_PATH` | No | Custom path for token storage (default: `~/.linkedin-mcp/tokens.json`) |
-| `LINKEDIN_MCP_APPROVAL_STAMP` | No | Text appended to posts showing human approval. Set to empty string to disable. Default: `AI-drafted · Human-approved · Posted via LinkedIn MCP` |
-| `LINKEDIN_MCP_AUDIT_PATH` | No | Custom path for the audit log (default: `~/.linkedin-mcp/audit.log`) |
-| `LINKEDIN_MCP_ENCRYPTION_KEY` | No | Custom encryption key for token storage. Enables token portability between machines. When unset, uses a machine-derived key. |
-| `LINKEDIN_MCP_HISTORY_PATH` | No | Custom path for the post history file (default: `~/.linkedin-mcp/history.json`) |
-| `LINKEDIN_MCP_CALLBACK_PORT` | No | OAuth callback port (default: `8585`). Change if another service is using that port. Remember to update the redirect URL in your LinkedIn Developer App to match. |
-
-## Usage
-
-### First-time login
-
-Ask Claude to log you in:
-
-> "Log in to my LinkedIn account"
-
-This opens your browser for LinkedIn's OAuth consent page. After authorizing, the token is stored locally and lasts 60 days.
-
-### Posting content
-
-> "Write a LinkedIn post about the project I just shipped and publish it"
-
-Claude will draft the post and show you the exact content before publishing. You approve or reject via the standard tool approval prompt.
-
-### Sharing an article
-
-> "Share this article on LinkedIn with a short commentary: https://example.com/article"
-
-### Posting with an image
-
-> "Create a LinkedIn post about our team event and attach the photo at /path/to/image.jpg"
+| `LINKEDIN_MCP_TOKEN_PATH` | No | Custom token storage path (default: `~/.linkedin-mcp/tokens.json`) |
+| `LINKEDIN_MCP_APPROVAL_STAMP` | No | Text appended to posts. Set to empty string to disable. |
+| `LINKEDIN_MCP_AUDIT_PATH` | No | Custom audit log path (default: `~/.linkedin-mcp/audit.log`) |
+| `LINKEDIN_MCP_ENCRYPTION_KEY` | No | Custom encryption key for token portability between machines |
+| `LINKEDIN_MCP_HISTORY_PATH` | No | Custom post history path (default: `~/.linkedin-mcp/history.json`) |
+| `LINKEDIN_MCP_CALLBACK_PORT` | No | OAuth callback port (default: `8585`) |
 
 ## How it works
 
-1. **Authentication**: Standard OAuth 2.0 Authorization Code Flow. Your browser handles the LinkedIn login — credentials never pass through the MCP server.
-2. **Token storage**: Access tokens are encrypted at rest using Fernet encryption with a machine-derived key, stored at `~/.linkedin-mcp/tokens.json`. Tokens expire after 60 days.
-3. **Token refresh**: If LinkedIn provides a refresh token, the server will silently refresh expired access tokens without opening the browser. If no refresh token is available, you'll be prompted to re-authenticate.
-4. **Human-in-the-loop**: Every write action (post, delete) requires explicit user approval in your MCP client before the API call is made.
-5. **API scope**: Uses only `openid`, `profile`, `email`, and `w_member_social` — the minimum required for profile reading and content posting.
+1. **Authentication** — Standard OAuth 2.0 Authorization Code Flow via your browser. Credentials never pass through the MCP server.
+2. **Token storage** — Encrypted at rest using Fernet. Tokens expire after 60 days; refresh tokens are used automatically when available.
+3. **Human-in-the-loop** — Every write action requires explicit user approval before the API call is made.
+4. **Minimal scope** — Only `openid`, `profile`, `email`, and `w_member_social`.
 
 ## ToS compliance
 
-This server is designed to comply with LinkedIn's [User Agreement](https://www.linkedin.com/legal/user-agreement) and [API Terms of Use](https://www.linkedin.com/legal/l/api-terms-of-use):
-
-- Uses only the **official API** — no scraping, crawling, or browser automation
-- **No automated posting** — every publish action requires human approval
-- **Minimal data access** — only requests the scopes needed
+- Uses only the **official LinkedIn API** — no scraping, crawling, or browser automation
+- **No automated posting** — every publish requires human approval
 - **No data storage beyond tokens** — profile data is fetched on demand, not cached
-- **No mass messaging** — the server publishes individual posts, not bulk content
 
 ## Rate limits
 
@@ -232,7 +119,7 @@ This server is designed to comply with LinkedIn's [User Agreement](https://www.l
 
 ## Architecture
 
-See [docs/architecture.md](docs/architecture.md) for implementation details, design decisions, and API reference.
+See [docs/architecture.md](docs/architecture.md) for implementation details and design decisions.
 
 ## License
 

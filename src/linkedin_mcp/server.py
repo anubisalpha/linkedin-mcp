@@ -422,6 +422,41 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="linkedin_create_video_post",
+            description=(
+                "Upload a video and publish a post with it on LinkedIn. "
+                "Must be called twice: first without confirm to preview, "
+                "then with confirm=true after the user approves the content."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The post content text.",
+                    },
+                    "video_path": {
+                        "type": "string",
+                        "description": "Absolute path to the video file to upload.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Optional title for the video.",
+                        "default": "",
+                    },
+                    "visibility": {
+                        "type": "string",
+                        "enum": ["PUBLIC", "CONNECTIONS"],
+                        "description": "Who can see the post. Defaults to PUBLIC.",
+                        "default": "PUBLIC",
+                    },
+                    "confirm": CONFIRM_SCHEMA,
+                },
+                "required": ["text", "video_path"],
+                "additionalProperties": False,
+            },
+        ),
+        Tool(
             name="linkedin_setup",
             description=(
                 "First-run setup assistant. Checks your configuration and walks you through "
@@ -467,6 +502,8 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
             return await _handle_poll_post(arguments)
         elif name == "linkedin_create_document_post":
             return await _handle_document_post(arguments)
+        elif name == "linkedin_create_video_post":
+            return await _handle_video_post(arguments)
         elif name == "linkedin_post_history":
             return await _handle_post_history(arguments)
         elif name == "linkedin_link_preview":
@@ -859,6 +896,70 @@ async def _handle_document_post(args: dict[str, Any]) -> CallToolResult:
     )
     audit.log("published", "linkedin_create_document_post", f"{text} | {file_path}", result.urn)
     history.record_post(result.urn, "document", text, visibility)
+    return CallToolResult(content=[TextContent(type="text", text=result.message)])
+
+
+SUPPORTED_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+MAX_VIDEO_SIZE_MB = 200
+
+
+async def _handle_video_post(args: dict[str, Any]) -> CallToolResult:
+    token = _require_token()
+    text = args["text"]
+    video_path = args["video_path"]
+    title = args.get("title", "")
+    visibility = args.get("visibility", "PUBLIC")
+
+    from pathlib import Path as _Path
+    vid_path = _Path(video_path)
+    if not vid_path.exists():
+        return CallToolResult(
+            content=[TextContent(type="text", text=f"File not found: {video_path}")],
+            isError=True,
+        )
+    ext = vid_path.suffix.lower()
+    if ext not in SUPPORTED_VIDEO_EXTENSIONS:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Unsupported video type '{ext}'. Supported: {', '.join(sorted(SUPPORTED_VIDEO_EXTENSIONS))}",
+            )],
+            isError=True,
+        )
+
+    file_size_mb = vid_path.stat().st_size / (1024 * 1024)
+    if file_size_mb > MAX_VIDEO_SIZE_MB:
+        return CallToolResult(
+            content=[TextContent(
+                type="text",
+                text=f"Video is {file_size_mb:.1f} MB — LinkedIn's limit is {MAX_VIDEO_SIZE_MB} MB.",
+            )],
+            isError=True,
+        )
+
+    if not args.get("confirm", False):
+        stamp = _get_approval_stamp()
+        stamped = text + stamp
+        preview = (
+            f"Video post ({visibility}):\n\n{stamped}\n\n"
+            f"File: {vid_path.name} ({file_size_mb:.1f} MB)"
+        )
+        if title:
+            preview += f"\nTitle: {title}"
+        audit.log("preview", "linkedin_create_video_post", f"{text} | {video_path}")
+        return _preview_result(preview, stamped)
+
+    audit.log("publish", "linkedin_create_video_post", f"{text} | {video_path}")
+    result = api.create_video_post(
+        access_token=token.access_token,
+        person_urn=token.sub,
+        text=text,
+        video_path=video_path,
+        title=title,
+        visibility=visibility,
+    )
+    audit.log("published", "linkedin_create_video_post", f"{text} | {video_path}", result.urn)
+    history.record_post(result.urn, "video", text, visibility)
     return CallToolResult(content=[TextContent(type="text", text=result.message)])
 
 

@@ -395,3 +395,68 @@ class TestDocumentPost:
         result = api.create_document_post("token", "p1", "Report", "/report.pdf")
         body = mock_post.call_args[1]["json"]
         assert "title" not in body["content"]["article"]
+
+
+class TestVideoPost:
+    @patch("linkedin_mcp.api.httpx.post")
+    def test_register_video_upload(self, mock_post):
+        mock_post.return_value = MagicMock(status_code=200)
+        mock_post.return_value.raise_for_status = MagicMock()
+        mock_post.return_value.json.return_value = {
+            "value": {
+                "uploadInstructions": [
+                    {"uploadUrl": "https://upload.example.com/video"}
+                ],
+                "video": "urn:li:video:abc123",
+            }
+        }
+        upload_url, video_urn = api._register_video_upload("token", "person1", 1024)
+        assert upload_url == "https://upload.example.com/video"
+        assert video_urn == "urn:li:video:abc123"
+
+    @patch("linkedin_mcp.api.httpx.put")
+    def test_upload_video_binary(self, mock_put, tmp_path):
+        mock_put.return_value = MagicMock(status_code=200)
+        mock_put.return_value.raise_for_status = MagicMock()
+
+        vid = tmp_path / "test.mp4"
+        vid.write_bytes(b"\x00\x00\x00\x1cftypisom")
+        api._upload_video_binary("token", "https://upload.example.com", str(vid))
+        mock_put.assert_called_once()
+        assert mock_put.call_args[1]["content"] == b"\x00\x00\x00\x1cftypisom"
+
+    @patch("linkedin_mcp.api.httpx.post")
+    @patch("linkedin_mcp.api._upload_video_binary")
+    @patch("linkedin_mcp.api._register_video_upload")
+    def test_create_video_post(self, mock_register, mock_upload, mock_post, tmp_path):
+        mock_register.return_value = ("https://upload.example.com", "urn:li:video:abc")
+        mock_post.return_value = MagicMock(
+            status_code=201,
+            headers={"X-RestLi-Id": "urn:li:share:vid1"},
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        vid = tmp_path / "demo.mp4"
+        vid.write_bytes(b"\x00" * 100)
+        result = api.create_video_post("token", "p1", "Watch this", str(vid), title="Demo")
+        assert result.urn == "urn:li:share:vid1"
+        body = mock_post.call_args[1]["json"]
+        assert body["content"]["media"]["media"] == "urn:li:video:abc"
+        assert body["content"]["media"]["title"] == "Demo"
+
+    @patch("linkedin_mcp.api.httpx.post")
+    @patch("linkedin_mcp.api._upload_video_binary")
+    @patch("linkedin_mcp.api._register_video_upload")
+    def test_create_video_post_no_title(self, mock_register, mock_upload, mock_post, tmp_path):
+        mock_register.return_value = ("https://upload.example.com", "urn:li:video:abc")
+        mock_post.return_value = MagicMock(
+            status_code=201,
+            headers={"X-RestLi-Id": "urn:li:share:vid2"},
+        )
+        mock_post.return_value.raise_for_status = MagicMock()
+
+        vid = tmp_path / "clip.mp4"
+        vid.write_bytes(b"\x00" * 50)
+        result = api.create_video_post("token", "p1", "Quick clip", str(vid))
+        body = mock_post.call_args[1]["json"]
+        assert "title" not in body["content"]["media"]

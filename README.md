@@ -47,6 +47,7 @@ See [pipeline/README.md](pipeline/README.md) for full manual setup, configuratio
 | `linkedin_create_image_post` | Upload an image and publish with text |
 | `linkedin_create_poll` | Create a poll with 2-4 options and configurable duration |
 | `linkedin_create_document_post` | Upload a document (PDF, PPTX, DOCX, etc.) and publish with text |
+| `linkedin_create_video_post` | Upload a video and publish with text |
 | `linkedin_delete_post` | Delete a post by its URN |
 | `linkedin_undo_last_post` | Quick-delete the most recently published post (undo) |
 | `linkedin_post_history` | View your post history — URNs, timestamps, content, with optional type filter |
@@ -76,11 +77,12 @@ All write operations require explicit user approval before executing, keeping th
 - **First-run setup** — Interactive setup assistant that checks configuration and walks through missing steps
 - **Poll creation** — Create LinkedIn polls with 2-4 options and configurable duration (1, 3, 7, or 14 days)
 - **Document posts** — Upload and share PDFs, slide decks, and other documents as native LinkedIn document posts
+- **Video posts** — Upload and publish video content (MP4, MOV, AVI, MKV, WEBM) up to 200 MB via LinkedIn's video upload API
 - **Minimal scope** — Only requests the API scopes needed (`openid`, `profile`, `email`, `w_member_social`)
 
 ### Testing
 
-The project includes a comprehensive test suite with **217 unit tests** (99% coverage) covering all modules:
+The project includes a comprehensive test suite with **229 unit tests** (96% coverage) covering all modules:
 
 ```bash
 pip install -e ".[dev]"
@@ -90,11 +92,11 @@ pytest tests/ -v
 | Test file | Tests | Coverage |
 |---|---|---|
 | `test_models.py` | 24 | Encryption, token save/load, expiry, backward compatibility, configurable key |
-| `test_auth.py` | 29 | OAuth flow, token refresh, auto-refresh logic, configurable port, callback handler, real HTTP callback tests |
-| `test_api.py` | 35 | Post building, approval stamp, API calls, URL encoding, image upload, link preview, polls, documents |
+| `test_auth.py` | 32 | OAuth flow, token refresh, auto-refresh logic, scope normalisation, configurable port, callback handler, real HTTP callback tests |
+| `test_api.py` | 39 | Post building, approval stamp, API calls, URL encoding, image upload, video upload, link preview, polls, documents |
 | `test_audit.py` | 7 | NDJSON logging, truncation, directory creation, configurable path |
 | `test_history.py` | 14 | Post recording, retrieval, filtering, deletion, corruption handling |
-| `test_server.py` | 108 | All tool handlers, call routing, preview enforcement, health check, undo, polls, documents, setup, MCP Inspector |
+| `test_server.py` | 115 | All tool handlers, call routing, preview enforcement, health check, undo, polls, documents, video, setup, MCP Inspector |
 
 ## Setup
 

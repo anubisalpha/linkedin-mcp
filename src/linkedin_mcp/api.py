@@ -41,6 +41,7 @@ UGC_POSTS_URL = f"{API_BASE}/ugcPosts"
 ASSETS_URL = f"{API_BASE}/assets"
 POSTS_URL = f"{REST_BASE}/posts"
 DOCUMENTS_URL = f"{REST_BASE}/documents"
+VIDEOS_URL = f"{REST_BASE}/videos"
 
 RESTLI_HEADER = {"X-Restli-Protocol-Version": "2.0.0"}
 LINKEDIN_VERSION = "202405"
@@ -362,6 +363,84 @@ def create_document_post(
     resp.raise_for_status()
     urn = resp.headers.get("X-RestLi-Id", "")
     return PostResult(urn=urn, status="created", message=f"Document post published: {urn}")
+
+
+def _register_video_upload(
+    access_token: str, person_urn: str, file_size: int
+) -> tuple[str, str]:
+    """Register a video for upload. Returns (upload_url, video_urn)."""
+    body = {
+        "initializeUploadRequest": {
+            "owner": f"urn:li:person:{person_urn}",
+            "fileSizeBytes": file_size,
+            "uploadCausalItyEnabled": True,
+        }
+    }
+    resp = httpx.post(
+        f"{VIDEOS_URL}?action=initializeUpload",
+        json=body,
+        headers=_rest_headers(access_token),
+    )
+    resp.raise_for_status()
+    data = resp.json()["value"]
+    upload_url: str = data["uploadInstructions"][0]["uploadUrl"]
+    video_urn: str = data["video"]
+    return upload_url, video_urn
+
+
+def _upload_video_binary(access_token: str, upload_url: str, video_path: str) -> None:
+    """Upload the video binary to LinkedIn's upload URL."""
+    video_data = Path(video_path).read_bytes()
+    resp = httpx.put(
+        upload_url,
+        content=video_data,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/octet-stream",
+        },
+        timeout=600,
+    )
+    resp.raise_for_status()
+
+
+def create_video_post(
+    access_token: str,
+    person_urn: str,
+    text: str,
+    video_path: str,
+    title: str = "",
+    visibility: str = "PUBLIC",
+) -> PostResult:
+    """Upload a video and create a post with it on LinkedIn."""
+    file_size = Path(video_path).stat().st_size
+    upload_url, video_urn = _register_video_upload(access_token, person_urn, file_size)
+    _upload_video_binary(access_token, upload_url, video_path)
+
+    vis_value = "PUBLIC" if visibility == "PUBLIC" else "CONNECTIONS"
+    video_content: dict[str, object] = {"media": video_urn}
+    if title:
+        video_content["title"] = title
+
+    body: dict[str, object] = {
+        "author": f"urn:li:person:{person_urn}",
+        "commentary": _stamp_text(text),
+        "visibility": vis_value,
+        "distribution": {
+            "feedDistribution": "MAIN_FEED",
+            "targetEntities": [],
+            "thirdPartyDistributionChannels": [],
+        },
+        "lifecycleState": "PUBLISHED",
+        "content": {"media": video_content},
+    }
+    resp = httpx.post(
+        POSTS_URL,
+        json=body,
+        headers=_rest_headers(access_token),
+    )
+    resp.raise_for_status()
+    urn = resp.headers.get("X-RestLi-Id", "")
+    return PostResult(urn=urn, status="created", message=f"Video post published: {urn}")
 
 
 _OG_PATTERN = re.compile(

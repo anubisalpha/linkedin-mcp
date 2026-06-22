@@ -33,6 +33,7 @@ from linkedin_mcp.server import (
     _handle_post_history,
     _handle_setup,
     _handle_undo_last_post,
+    _handle_video_post,
     _require_token,
     call_tool,
     list_tools,
@@ -72,7 +73,7 @@ class TestListTools:
         assert "linkedin_undo_last_post" in names
         assert "linkedin_create_poll" in names
         assert "linkedin_create_document_post" in names
-        assert len(tools) == 16
+        assert len(tools) == 17
 
     @pytest.mark.asyncio
     async def test_all_schemas_have_additional_properties_false(self):
@@ -893,6 +894,13 @@ class TestCallToolRoutingNewTools:
             await call_tool("linkedin_create_document_post", {"text": "x", "file_path": "/tmp/f.pdf"})
             m.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_routes_video_post(self):
+        with patch("linkedin_mcp.server._handle_video_post") as m:
+            m.return_value = CallToolResult(content=[TextContent(type="text", text="ok")])
+            await call_tool("linkedin_create_video_post", {"text": "x", "video_path": "/tmp/v.mp4"})
+            m.assert_called_once()
+
 
 class TestHealthCheckBranches:
     @pytest.mark.asyncio
@@ -1184,3 +1192,74 @@ class TestHandleDocumentPost:
         })
         assert result.isError is True
         assert "100 MB" in result.content[0].text
+
+
+class TestHandleVideoPost:
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_preview(self, mock_load, tmp_path):
+        mock_load.return_value = _make_token()
+        vid = tmp_path / "demo.mp4"
+        vid.write_bytes(b"\x00\x00\x00\x1cftypisom" * 100)
+        result = await _handle_video_post({
+            "text": "Check out this video",
+            "video_path": str(vid),
+            "title": "Demo Clip",
+        })
+        text = result.content[0].text
+        assert "PREVIEW" in text
+        assert "demo.mp4" in text
+        assert "Demo Clip" in text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.history.record_post")
+    @patch("linkedin_mcp.server.api.create_video_post")
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_confirm_publishes(self, mock_load, mock_create, mock_history, tmp_path):
+        mock_load.return_value = _make_token()
+        vid = tmp_path / "clip.mp4"
+        vid.write_bytes(b"\x00" * 1000)
+        mock_create.return_value = PostResult(
+            urn="urn:li:share:vid1", status="created",
+            message="Video post published: urn:li:share:vid1",
+        )
+        result = await _handle_video_post({
+            "text": "New video", "video_path": str(vid), "confirm": True,
+        })
+        assert "Video post published" in result.content[0].text
+        mock_create.assert_called_once()
+        mock_history.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_rejects_missing_file(self, mock_load):
+        mock_load.return_value = _make_token()
+        result = await _handle_video_post({
+            "text": "x", "video_path": "/nonexistent/video.mp4",
+        })
+        assert result.isError is True
+        assert "File not found" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_rejects_unsupported_extension(self, mock_load, tmp_path):
+        mock_load.return_value = _make_token()
+        f = tmp_path / "clip.gif"
+        f.write_bytes(b"GIF89a")
+        result = await _handle_video_post({
+            "text": "x", "video_path": str(f),
+        })
+        assert result.isError is True
+        assert "Unsupported video type" in result.content[0].text
+
+    @pytest.mark.asyncio
+    @patch("linkedin_mcp.server.auth.load_token")
+    async def test_rejects_oversized_file(self, mock_load, tmp_path):
+        mock_load.return_value = _make_token()
+        f = tmp_path / "huge.mp4"
+        f.write_bytes(b"\x00" * (201 * 1024 * 1024))
+        result = await _handle_video_post({
+            "text": "x", "video_path": str(f),
+        })
+        assert result.isError is True
+        assert "200 MB" in result.content[0].text
